@@ -2,8 +2,8 @@
 // @name         Advanced Website Update Monitor with Auto-Hide UI
 // @namespace    http://your.namespace.com
 // @version      2.14
-// @description  Monitors updates with iframe refresh, partial DOM injection, auto-hiding UI, and more
-// @author       Grok
+// @description  Monitors updates with iframe refresh, partial DOM injection.
+// @author       ZLudany
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
