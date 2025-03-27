@@ -6,7 +6,7 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @author       ZLudany
-// @version      2.2.1
+// @version      3.2.1
 // @description  25/03/2025, 01:54:34 Monitors updates with iframe refresh, partial DOM injection.
 // ==/UserScript==
 window.addEventListener('load', function onload(){
