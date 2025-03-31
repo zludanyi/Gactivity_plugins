@@ -10,7 +10,6 @@
 
 (function() {
     'use strict';
-
     // Styles as a string (unchanged from previous step)
     const styles = `
         /* General */
@@ -325,25 +324,25 @@
             name: 'Ground Floor',
             z: 0,
             rooms: [
-                { name: 'Entryway', x: 0, y: 3, width: 6, depth: 1, color: 0xdeb887, innerColor: 0xe6d5a8, details: 'The main entrance to the building.' },
+                { name: 'Entryway', x: 0, y: 3, width: 6, depth: 2, color: 0xdeb887, innerColor: 0xe6d5a8, details: 'The main entrance to the building.' },
                 { name: 'Passage', x: 0, y: 7, width: 2, depth: 1, color: 0xa9a9a9, innerColor: 0xbababa, details: 'A narrow hallway connecting rooms.' },
-                { name: 'Master Bedroom', x: 0, y: 11, width: 6, depth: 1, color: 0x808080, innerColor: 0x999999, details: 'A spacious bedroom with a view.' }
+                { name: 'Master Bedroom', x: 0, y: 11, width: 6, depth: 4, color: 0x808080, innerColor: 0x999999, details: 'A spacious bedroom with a view.' }
             ]
         },
         {
             name: 'First Floor',
             z: 1,
             rooms: [
-                { name: 'Living Room', x: 0, y: 3, width: 6, depth: 1, color: 0x4682b4, innerColor: 0x6a9bd3, details: 'A cozy space for relaxation.' },
-                { name: 'Wellness Room', x: 0, y: 7, width: 2, depth: 1, color: 0xffcccc, innerColor: 0xffe6e6, details: 'A room for meditation and wellness.' }
+                { name: 'Living Room', x: 0, y: 3, width: 6, depth: 4, color: 0x4682b4, innerColor: 0x6a9bd3, details: 'A cozy space for relaxation.' },
+                { name: 'Wellness Room', x: 0, y: 7, width: 4, depth: 3, color: 0xffcccc, innerColor: 0xffe6e6, details: 'A room for meditation and wellness.' }
             ]
         },
         {
             name: 'Second Floor',
             z: 2,
             rooms: [
-                { name: 'Guest Room', x: 0, y: 3, width: 4, depth: 1, color: 0x90ee90, innerColor: 0xaaffaa, details: 'A comfortable room for guests.' },
-                { name: 'Study', x: 0, y: 7, width: 4, depth: 1, color: 0xdda0dd, innerColor: 0xe6b8e6, details: 'A quiet space for work and study.' }
+                { name: 'Guest Room', x: 0, y: 3, width: 6, depth: 4, color: 0x90ee90, innerColor: 0xaaffaa, details: 'A comfortable room for guests.' },
+                { name: 'Office', x: 0, y: 7, width: 4, depth: 2, color: 0xdda0dd, innerColor: 0xe6b8e6, details: 'A quiet space for work and study.' }
             ]
         }
     ];
