@@ -7,7 +7,6 @@
 // @match        https://myactivity.google.com/product/assistant*
 // @grant        none
 // ==/UserScript==
-
 (function() {
     'use strict';
     // Styles as a string (unchanged from previous step)
