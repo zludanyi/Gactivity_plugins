@@ -1,628 +1,695 @@
 // ==UserScript==
-// @name         3D SVG Multi-Level Floorplan
-// @version      2.2
-// @description  3D SVG Multi-level floorplan
-// @author       ZLudany
+// @name         3D SVG Multi-Level Floorplan with Declarative Rooms
+// @version      2.4
+// @description  Enhanced 3D SVG Multi-level floorplan with declarative room generation, SVG control icons, and Codrops animations
+// @author       ZLudany
 // @match        https://home.google.com/*
 // @grant        none
 // ==/UserScript==
 (function() {
-    'use strict';
-    // Styles as a string (unchanged from previous step)
-    const styles = `
-        /* General */
-        *,
-        *::after,
-        *::before {
-            box-sizing: border-box;
-        }
-        a {
-            text-decoration: none;
-            color: #aaa;
-            outline: none;
-        }
-        a:hover,
-        a:focus {
-            color: #515158;
-            outline: none;
-        }
-        /* Container */
-        .container {
-            width: 150px;
-            height: 415px; /* 400px SVG + 15px locations */
-            display: flex;
-            flex-direction: column;
+    'use strict';
+
+    // Styles
+    const styles = `
+        .container {
+            width: 150px;
+            height: 415px;
+            display: flex;
+            flex-direction: column;
             position: fixed;
-            top:  -50px;
-            right: 200px;
-            background: #222;
-            z-index: 10000000;
-        }
-        /* Map */
-        .map {
-            width: 100%;
-            height: 400px;
-            position: relative;
-            perspective: 1000px;
-            perspective-origin: 50% 50%;
-        }
-        .map__levels {
-            width: 150px;
-            height: 400px;
-            /*
-            position: fixed;
-            top: -50px;
-            left: 200px;
-            */
-            display: flex;
-            /* margin: -200px 0 0 -75px; */
-            transition: transform 0.3s;
-            transform-style: preserve-3d;
-        }
-        .map__space {
-            cursor: pointer;
-            display: flex;
-            transition: fill-opacity 0.8s;
-            fill: #bdbdbd;
-            fill-opacity: 0.6;
-        }
-        .map__space:hover {
-            fill-opacity: 0.8;
-        }
-        .map__space--selected {
-            fill: #A4A4A4;
-            fill-opacity: 1;
-        }
-        .map__pin {
-            width: 8px;
-            height: 8px;
-            z-index: 9999;
-            -webkit-transform-style: preserve-3d;
-            transform-style: preserve-3d;
-            opacity: 0;
-            -webkit-transform: translate3d(0, -20px, -20px);
-            transform: translate3d(0, -20px, -20px);
-            -webkit-transition: opacity 0.3s, -webkit-transform 0.3s;
-            transition: opacity 0.3s, transform 0.3s;
-            -webkit-transition-timing-function: cubic-bezier(0.2, 1, 0.3, 1);
-            transition-timing-function: cubic-bezier(0.2, 1, 0.3, 1);
-        }
-        .map__pin--active {
-            opacity: 1;
-            z-index: 9999;
-            -webkit-transform: translate3d(0, 0, 0);
-            transform: translate3d(0, 0, 0);
-        }
-        .map__pin:nth-child(2) {
-            -webkit-transition-delay: 0.05s;
-            transition-delay: 0.05s;
-        }
-        .map__pin:nth-child(3) {
-            -webkit-transition-delay: 0.1s;
-            transition-delay: 0.1s;
-        }
-        .map__pin:nth-child(4) {
-            -webkit-transition-delay: 0.15s;
-            transition-delay: 0.15s;
-        }
-        .map__pin:nth-child(5) {
-            -webkit-transition-delay: 0.2s;
-            transition-delay: 0.2s;
-        }
-        .map__pin:nth-child(6) {
-            -webkit-transition-delay: 0.25s;
-            transition-delay: 0.25s;
-        }
-        .map__pin:nth-child(7) {
-            -webkit-transition-delay: 0.3s;
-            transition-delay: 0.3s;
-        }
-        .map__level {
-            /*
+            top: 170px;
+            right: 150px;
+            background: #222;
+            z-index: 10000000;
+        }
+        .map {
+            width: 100%;
+            height: 300px;
             position: relative;
-            top:  0px;
-            left: 0px;
-            */
-            width: 100%;
-            height: 100%;
+            perspective: 1000px;
+            perspective-origin: 50% 50%;
+        }
+        .map__levels {
+            width: 150px;
+            height: 400px;
             display: flex;
-            cursor: pointer;
-            /* pointer-events: auto; */
-            -webkit-transition: opacity 1s, -webkit-transform 1s;
-            transition: opacity 1s, transform 1s;
-            -webkit-transition-timing-function: cubic-bezier(0.7, 0, 0.3, 1);
-            transition-timing-function: cubic-bezier(0.7, 0, 0.3, 1);
-            -webkit-transform-style: preserve-3d;
-            transform-style: preserve-3d;
-        }
-        .map__level::after {
-            font-size: 8px;
-            line-height: 0;
+            transition: transform 0.3s;
+            transform-style: preserve-3d;
+        }
+        .map__space {
+            cursor: move;
+            transition: fill-opacity 0.8s;
+            fill-opacity: 0.6;
+        }
+        .map__space:hover {
+            fill-opacity: 0.8;
+        }
+        .map__space--selected {
+            fill-opacity: 1;
+        }
+        .map__pin {
+            width: 8px;
+            height: 8px;
+            z-index: 9999;
+            transform-style: preserve-3d;
+            opacity: 0;
+            transform: translate3d(0, -20px, -20px);
+            transition: opacity 0.3s, transform 0.3s;
+            transition-timing-function: cubic-bezier(0.2, 1, 0.3, 1);
+        }
+        .map__pin--active {
+            opacity: 1;
+            transform: translate3d(0, 0, 0);
+        }
+        .map__level {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            transition: opacity 1s, transform 1s;
+            transition-timing-function: cubic-bezier(0.7, 0, 0.3, 1);
+            transform-style: preserve-3d;
+        }
+        .controls {
+            width: 100%;
+            height: 100px;
+            display: flex;
+            flex-direction: column;
+            background: #444;
+        }
+        .controls__btn {
+            width: 100%;
+            height: 25px;
+            background: none;
+            border: none;
+            color: #ccc;
+            font-size: 1em;
+            cursor: pointer;
+            transition: color 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .controls__btn:hover {
+            color: #fff;
+        }
+        .controls__level {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1em;
+            color: #ccc;
+            cursor: pointer;
+            transition: color 0.3s;
+        }
+        .controls__level:hover {
+            color: #fff;
+        }
+        .controls__btn--reset {
+            height: 25px;
+            font-size: 0.8em;
+        }
+        .locations {
+            width: 100%;
+            height: 15px;
+            overflow-y: auto;
+            background: #444;
+        }
+        .locations__list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .locations__item {
+            display: block;
+        }
+        .locations__link {
+            display: block;
+            padding: 1px 2px;
+            font-size: 6px;
+            color: #ccc;
+            text-decoration: none;
+        }
+        .content {
             position: fixed;
-            top: -50px;
-            left: 200px;
-            z-index: 999999;
-            white-space: nowrap;
-            color: #7d7d86;
-            -webkit-transform: rotateZ(45deg) rotateX(-60deg) translateZ(5px);
-            transform: rotateZ(45deg) rotateX(-60deg) translateZ(5px);
-            -webkit-transition: -webkit-transform 1s, color 0.3s;
-            transition: transform 1s, color 0.3s;
-            -webkit-transition-timing-function: cubic-bezier(0.7, 0, 0.3, 1);
-            transition-timing-function: cubic-bezier(0.7, 0, 0.3, 1);
-        }
-        .map__level:hover::after {
-            color: #515158;
-        }
-        .map__level--1::after {
-            content: 'L1';
-        }
-        .map__level--2::after {
-            content: 'L2';
-        }
-        .map__level--3::after {
-            content: 'L3';
-        }
-        .map__level--1 {
-            position: relative;
-            top:  0px;
-            left: 0px;
-            background-color: #FF0000;
-            -webkit-transform: translateZ(0px);
-            transform: translateZ(0px);
-        }
-        .map__level--2 {
-            position: relative;
-            top:  40px;
-            left: 40px;
-            background-color: #0000FF;
-            -webkit-transform: translateZ(40px);
-            transform: translateZ(40px);
-        }
-        .map__level--3 {
-            position: relative;
-            top:  80px;
-            left: 80px;
-            background-color: #00FF00;
-            -webkit-transform: translateZ(80px);
-            transform: translateZ(80px);
-        }
-        /* Controls */
-        .controls {
-            width: 100%;
-            height: 15px;
-            display: flex;
-            flex-direction: column;
-        }
-        .locations {
-            width: 100%;
-            height: 15px;
-            overflow-y: auto;
-            background: #444;
-        }
-        .locations__list {
-            list-style: none;
-            padding: 0;
-            margin: 0;
-        }
-        .locations__item {
-            display: block;
-        }
-        .locations__link {
-            display: block;
-            padding: 1px 2px;
-            font-size: 6px;
-            color: #ccc;
-            text-decoration: none;
-        }
-        .locations__link:hover {
-            color: #515158;
-        }
-        .locations__name {
-            margin: 0;
-            font-size: 6px;
-        }
-        .locations__floor {
-            margin: 0;
-            font-size: 5px;
-            color: #999;
-        }
-        /* Content Popup */
-        .content {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            /* pointer-events: none; */
-            z-index: 10000;
-        }
-        .content__item {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            padding: 2em;
-            background: rgba(0, 0, 0, 0.9);
-            color: #fff;
-            opacity: 0;
-            -webkit-transform: translate3d(0, 50px, 0);
-            transform: translate3d(0, 50px, 0);
-            -webkit-transition: opacity 0.3s, -webkit-transform 0.3s;
-            transition: opacity 0.3s, transform 0.3s;
-            /* pointer-events: none; */
-        }
-        .content__item--current {
-            opacity: 1;
-            -webkit-transform: translate3d(0, 0, 0);
-            transform: translate3d(0, 0, 0);
-            pointer-events: auto;
-        }
-        .content__item-title {
-            font-size: 1em;
-            margin: 0 0 0.5em;
-        }
-        .content__item-details {
-            font-size: 0.75em;
-        }
-        .content__button {
-            position: absolute;
-            top: 1em;
-            right: 1em;
-            background: none;
-            border: none;
-            color: #fff;
-            font-size: 1em;
-            cursor: pointer;
-        }
-        /* Icons */
-        .icon {
-            display: block;
-            width: 1em;
-            height: 1em;
-            margin: 0 auto;
-            fill: currentColor;
-        }
-        .icon--pin {
-            width: 100%;
-            height: 100%;
-        }
-    `;
-    // Inject styles into the page
-    const styleElement = document.createElement('style');
-    styleElement.textContent = styles;
-    document.head.appendChild(styleElement);
-    // Floorplan data (extended with content for popups)
-    const floors = [
-        {
-            name: 'Ground Floor',
-            z: 0,
-            rooms: [
-                { name: 'Entryway', x: 0, y: 0, width: 4, depth: 11, color: "#DD0000", innerColor: "red", details: 'The main entrance to the building.' },
-                { name: 'Passage', x: 5, y: 11, width: 9, depth: 6, color: "#00DD00", innerColor: "green", details: 'A narrow hallway connecting rooms.' },
-                { name: 'Master Bedroom', x: 41, y: 11, width: 36, depth: 14, color:"#0000DD", innerColor: "blue", details: 'A spacious bedroom with a view.' }
-            ]
-        },
-        {
-            name: 'First Floor',
-            z: 1,
-            rooms: [
-                { name: 'Living Room', x: 5, y: 29, width: 10, depth: 18, color: "#AAAAAA", innerColor: "#CCCCCC", details: 'A cozy space for relaxation.' },
-                { name: 'Wellness Room', x: 15, y: 17, width: 12, depth: 9, color: "#DDDDDD", innerColor: "#EEEEEE", details: 'A room for meditation and wellness.' }
-            ]
-        },
-        {
-            name: 'Second Floor',
-            z: 2,
-            rooms: [
-                { name: 'Office', x: 0, y: 29, width: 5, depth: 6, color: "#EEEEEE", innerColor: "#FEFEFE", details: 'A quiet space for work and study.' }
-            ]
-        }
-    ];
-    // Function to convert hex color to SVG-compatible string
-    function hexToColorString(hex) {
-        return `#${hex.toString(16).padStart(6, '0')}`;
-    };
-    // Function to generate SVG dynamically with 3D layering
-    function generateSVG(floors) {
-        let svgContent = `
-            <svg width="150" height="400" viewBox="0 0 20 20" style="background:#FDFDFD; z-index=9999;" xmlns="http://www.w3.org/2000/svg">
-                <g class="map__symbols">
-                    <symbol id="icon-pin" width="8px" class="map__pin" viewBox="0 0 24 24">
-                        <path d="M12,2a8,8,0,0,0-8,8c0,5.09,7,13,8,13s8-7.91,8-13A8,8,0,0,0,12,2Zm0,11a3,3,0,1,1,3-3A3,3,0,0,1,12,13Z"/>
-                    </symbol>
-                    <symbol id="icon-cross" viewBox="0 0 24 24">
-                        <path d="M19,6.41,17.59,5,12,10.59,6.41,5,5,6.41,10.59,12,5,17.59,6.41,19,12,13.41,17.59,19,19,17.59,13.41,12Z"/>
-                    </symbol>
-                </g>
-        `;
-        floors.forEach((floor, index) => {
-            //alert("generateSVG(): "+(JSON.stringify(floor))+" : "+index);
-            svgContent += `<g id="level${index}" fill="#${(index)*22}0000" class="map__level map__level--${index + 1}" data-level="${index}">`;
-            floor.rooms.forEach((room, roomIndex) => {
-                const fillColor   = room.innerColor;
-                const strokeColor = room.color;
-                svgContent += `
-                    <rect id="space${index}-${roomIndex}"
-                          class="map__space"
-                          x="${room.x}" y="${room.y}"
-                          z="${room.depth}"
-                          width="${room.width}"
-                          height="${room.depth}"
-                          fill="${fillColor}"
-                          stroke="${strokeColor}"
-                          stroke-width="0.1"
-                          data-name="${room.name}"
-                          data-level="${index}"
-                          data-space="${index}-${roomIndex}" />
-                    <use  class="map__pin icon icon--pin"
-                          href="#icon-pin"
-                          x="${ room.x }"
-                          y="${ room.y }"
-                          data-space="space${index}-${roomIndex}" />
-                `;
-            });
-            svgContent += '</g>';
-        });
-        svgContent += '</svg>';
-        //alert("generateSVG: "+svgContent);
-        return svgContent;
-    };
-    // Generate location list
-    function generateLocationList(floors) {
-        let locationsContent = '';
-        floors.forEach((floor, floorIndex) => {
-            floor.rooms.forEach((room, roomIndex) => {
-                locationsContent += `
-                    <li class="locations__item" data-level="${floorIndex}" data-space="${floorIndex}-${roomIndex}">
-                        <a href="#" class="locations__link">
-                            <h2 class="locations__name">${room.name}</h2>
-                            <p class="locations__floor">${floor.name}</p>
-                        </a>
-                    </li>
-                `;
-            });
-        });
-        return locationsContent;
-    };
-    // Generate content popups
-    function generateContentPopups(floors) {
-        let contentContent = '';
-        floors.forEach((floor, floorIndex) => {
-            floor.rooms.forEach((room, roomIndex) => {
-                contentContent += `
-                    <div class="content__item" id="content-${floorIndex}-${roomIndex}">
-                        <h2 class="content__item-title">${room.name}</h2>
-                        <p class="content__item-details">${room.details}</p>
-                        <button class="content__button">Close</button>
-                    </div>
-                `;
-            });
-        });
-        return contentContent;
-    };
-    // Create HTML structure dynamically
-    const container = document.createElement('div');
-    container.className = 'container';
-    container.style.zIndex = 9000000;
-    const map = document.createElement('div');
-    map.className = 'map';
-    const mapLevels = document.createElement('div');
-    mapLevels.className = 'map__levels';
-    mapLevels.id = 'map-levels';
-    mapLevels.innerHTML = generateSVG(floors);
-    map.appendChild(mapLevels);
-    const controls = document.createElement('div');
-    controls.className = 'controls';
-    const sidebar = document.createElement('div');
-    sidebar.className = 'sidebar';
-    const locations = document.createElement('div');
-    locations.className = 'locations';
-    locations.id = 'locations';
-    const locationsList = document.createElement('ul');
-    locationsList.className = 'locations__list';
-    //locationsList.innerHTML = generateLocationList(floors);
-    locations.appendChild(locationsList);
-    sidebar.appendChild(locations);
-    container.appendChild(sidebar);
-    const content = document.createElement('div');
-    content.className = 'content';
-    content.id = 'content';
-    //content.innerHTML = generateContentPopups(floors);
-    container.appendChild(map);
-    container.appendChild(controls);
-    container.appendChild(content);
-    document.documentElement.
-             insertBefore(
-                          container,
-                          document.body
-                         );
-    container.style.position="fixed";
-    container.style.top   = "170px";
-    container.style.right = "150px";
-    // Utility functions from main.js
-    function extend(a, b) {
-        for (var key in b) {
-            if (b.hasOwnProperty(key)) {
-                a[key] = b[key];
-            }
-        }
-        return a;
-    };
-    function getMousePos(e) {
-        var posx = 0, posy = 0;
-        if (!e) e = window.event;
-        if (e.pageX || e.pageY) {
-            posx = e.pageX;
-            posy = e.pageY;
-        } else if (e.clientX || e.clientY) {
-            posx = e.clientX + document.body.scrollLeft + document.documentElement.scrollLeft;
-            posy = e.clientY + document.body.scrollTop + document.documentElement.scrollTop;
-        }
-        return { x: posx, y: posy };
-    };
-    // MallMap constructor
-    function MallMap(el, options) {
-        this.DOM = {};
-        this.DOM.el = el;
-        this.options = extend({
-            perspective: 1000,
-            spaceOpacityStep: 0.2,
-            maxOpacity: 1,
-            minOpacity: 0.3
-        }, options || {});
-        this.DOM.map = this.DOM.el.querySelector('.map');
-        this.DOM.levels = this.DOM.map.querySelector('.map__levels');
-        this.DOM.levelEls = Array.from(this.DOM.levels.querySelectorAll('.map__level'));
-        this.levels = this.DOM.levelEls.length;
-        this.currentLevel = 0; // Default level (not used for switching)
-        this.DOM.spaces = Array.from(this.DOM.levels.querySelectorAll('.map__space'));
-        this.DOM.pins = Array.from(this.DOM.levels.querySelectorAll('.map__pin'));
-        this.DOM.listItems = Array.from(this.DOM.el.querySelectorAll('.locations__item'));
-        this.DOM.content = this.DOM.el.querySelector('.content');
-        this.DOM.contentItems = Array.from(this.DOM.content.querySelectorAll('.content__item'));
-        this._layout();
-        this._initEvents();
-    };
-    MallMap.prototype = {
-        _initEvents: function() {
-            // Mouse move for 3D tilt effect
-            this.mousemoveFn = (ev) => {
-                requestAnimationFrame(() => {
-                    this._updateTransform(ev);
-                });
-            };
-            this.DOM.map.addEventListener('mousemove', this.mousemoveFn);
-            // Window resize
-            this.resizeFn = () => {
-                requestAnimationFrame(() => {
-                    this._updateSizes();
-                });
-            };
-            window.addEventListener('resize', this.resizeFn);
-            // Space clicks
-            this.DOM.spaces.forEach(space => {
-                space.addEventListener('click', (ev) => {
-                    ev.preventDefault();
-                    this.DOM.spaces.forEach(s => s.classList.remove('map__space--selected'));
-                    space.classList.add('map__space--selected');
-                    this._openContent(this._getSpaceData(space));
-                });
-            });
-            // Sidebar list item clicks
-            this.DOM.listItems.forEach(item => {
-                item.addEventListener('click', (ev) => {
-                    ev.preventDefault();
-                    const data = this._getSpaceData(item);
-                    const space = this.DOM.spaces.find(s => s.getAttribute('data-space') === data.space);
-                    if (space) {
-                        this.DOM.spaces.forEach(s => s.classList.remove('map__space--selected'));
-                        space.classList.add('map__space--selected');
-                        this._openContent(data);
-                    }
-                });
-            });
-            // Content close buttons
-            this.DOM.contentItems.forEach(item => {
-                const closeBtn = item.querySelector('.content__button');
-                closeBtn.addEventListener('click', (ev) => {
-                    ev.preventDefault();
-                    this._closeContent();
-                });
-            });
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10000;
+        }
+        .content__item {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            padding: 2em;
+            background: rgba(0, 0, 0, 0.9);
+            color: #fff;
+            opacity: 0;
+            transform: translate3d(0, 50px, 0);
+            transition: opacity 0.3s, transform 0.3s;
+        }
+        .content__item--current {
+            opacity: 1;
+            transform: translate3d(0, 0, 0);
+            pointer-events: auto;
+        }
+        .icon {
+            display: block;
+            width: 1em;
+            height: 1em;
+            margin: 0 auto;
+            fill: currentColor;
+        }
+        .icon--pin { width: 100%; height: 100%; }
+        .icon--levels { width: 1em; height: 1em; }
+        .icon--cross { width: 1em; height: 1em; }
+        .icon--prev { width: 1em; height: 1em; }
+        .icon--next { width: 1em; height: 1em; }
+        .drag-point {
+            cursor: pointer;
+            fill: #fff;
+            stroke: #000;
+            stroke-width: 0.5;
+        }
+    `;
+    const styleElement = document.createElement('style');
+    styleElement.textContent = styles;
+    document.head.appendChild(styleElement);
+
+    // Default floors structure
+    const defaultFloors = [
+        { name: 'Ground Floor', z: 0, rooms: [
+            { name: 'Entryway', x: 20, y: 30, width: 4, height: 11 },
+            { name: 'Passage', width: 5, height: 3, neighbours: [{ neighbour: 'Entryway', neighbouring: 'BOTTOMRIGHT' }] },
+            { name: 'Master Bedroom', width: 15, height: 8, neighbours: [{ neighbour: 'Passage', neighbouring: 'TOPRIGHT' }] }
+        ]},
+        { name: 'First Floor', z: 1, rooms: [
+            { name: 'Living Room', width: 9, height: 13, neighbours: [{ neighbour: 'Wellness Room', neighbouring: 'BOTTOMLEFT' }] },
+            { name: 'Wellness Room', width: 8, height: 6 }
+        ]},
+        { name: 'Second Floor', z: 2, rooms: [
+            { name: 'Office', width: 5, height: 6, neighbours: [{ neighbour: 'Living Room', neighbouring: 'TOPLEFTIN' }] }
+        ]}
+    ];
+
+    // Default pins structure
+    let defaultPins = [
+        { "Office": [{ x: 2.5, y: 3, type: "default", description: "" }] },
+        { "Entryway": [{ x: 2, y: 5.5, type: "default", description: "" }] },
+        { "Passage": [{ x: 2.5, y: 1.5, type: "default", description: "" }] },
+        { "Master Bedroom": [{ x: 7.5, y: 4, type: "default", description: "" }] },
+        { "Living Room": [{ x: 4.5, y: 6.5, type: "default", description: "" }] },
+        { "Wellness Room": [{ x: 4, y: 3, type: "default", description: "" }] }
+    ];
+
+    // IndexedDB setup
+    const dbName = "FloorplanDB";
+    const dbVersion = 1;
+    let db;
+
+    function openDB() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(dbName, dbVersion);
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                db.createObjectStore("floors", { keyPath: "name" });
+                db.createObjectStore("pins", { keyPath: "roomName" });
+            };
+            request.onsuccess = (event) => {
+                db = event.target.result;
+                resolve(db);
+            };
+            request.onerror = (event) => reject(event.target.error);
+        });
+    }
+
+    async function loadFromDB(storeName) {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction([storeName], "readonly");
+            const store = transaction.objectStore(storeName);
+            const request = store.getAll();
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    async function saveToDB(storeName, data) {
+        const db = await openDB();
+        const transaction = db.transaction([storeName], "readwrite");
+        const store = transaction.objectStore(storeName);
+        data.forEach(item => store.put(item));
+        return new Promise((resolve, reject) => {
+            transaction.oncomplete = () => resolve();
+            transaction.onerror = () => reject(transaction.error);
+        });
+    }
+
+    async function resetDB(storeName) {
+        const db = await openDB();
+        const transaction = db.transaction([storeName], "readwrite");
+        const store = transaction.objectStore(storeName);
+        store.clear();
+        return new Promise((resolve, reject) => {
+            transaction.oncomplete = () => resolve();
+            transaction.onerror = () => reject(transaction.error);
+        });
+    }
+
+    function generateColor(idx) {
+        const hue = (idx * 137.5) % 360;
+        return `hsl(${hue}, 50%, 50%)`;
+    }
+
+    // Codrops onEndTransition utility
+    function onEndTransition(el, callback) {
+        const onEndCallbackFn = function(ev) {
+            if (ev.target !== this) return;
+            this.removeEventListener('transitionend', onEndCallbackFn);
+            if (callback && typeof callback === 'function') { callback.call(this); }
+        };
+        if ('transition' in document.documentElement.style) {
+            el.addEventListener('transitionend', onEndCallbackFn);
+        } else {
+            onEndCallbackFn.call(el);
+        }
+    }
+
+    function MallMap(el, floorsParam) {
+        this.DOM = { el };
+        this.options = { perspective: 1000, spaceOpacityStep: 0.2, maxOpacity: 1, minOpacity: 0.3 };
+        this.containerWidth = 150;
+        this.containerHeight = 300;
+
+        this.initData(floorsParam).then(() => {
+            this.DOM.map = this.DOM.el.querySelector('.map');
+            this.DOM.levels = this.DOM.map.querySelector('.map__levels');
+            this.DOM.levelEls = Array.from(this.DOM.levels.querySelectorAll('.map__level'));
+            this.levels = this.DOM.levelEls.length;
+            this.currentLevel = -1;
+            this.DOM.spaces = Array.from(this.DOM.levels.querySelectorAll('.map__space'));
+            this.DOM.pins = Array.from(this.DOM.levels.querySelectorAll('.map__pin'));
+            this.DOM.listItems = Array.from(this.DOM.el.querySelectorAll('.locations__item'));
+            this.DOM.content = this.DOM.el.querySelector('.content');
+            this.DOM.contentItems = Array.from(this.DOM.content.querySelectorAll('.content__item'));
+            this.DOM.controls = this.DOM.el.querySelector('.controls');
+            this.DOM.btnPrev = this.DOM.controls.querySelector('.controls__btn--prev');
+            this.DOM.btnNext = this.DOM.controls.querySelector('.controls__btn--next');
+            this.DOM.levelIndicator = this.DOM.controls.querySelector('.controls__level');
+            this.DOM.resetFloors = this.DOM.controls.querySelector('.controls__btn--reset-floors');
+            this.DOM.resetPins = this.DOM.controls.querySelector('.controls__btn--reset-pins');
+            this._layout();
+            this._initEvents();
+        });
+    }
+
+    MallMap.prototype = {
+        async initData(floorsParam) {
+            const storedFloors = await loadFromDB("floors");
+            const storedPins = await loadFromDB("pins");
+            this.floors = storedFloors.length ? storedFloors : this.processFloors(floorsParam || defaultFloors);
+            this.pins = storedPins.length ? storedPins : defaultPins;
+            if (!storedFloors.length) {
+                await saveToDB("floors", this.floors);
+                await saveToDB("pins", this.pins);
+            }
+            this.generateSVG();
+            this.generateContentPopups();
+            this.DOM.levels.innerHTML = this.svgContent;
+            this.DOM.content.innerHTML = this.contentContent;
         },
-        _updateOpacityLevels: function() {
-            this.DOM.levelEls.forEach((level, idx) => {
-                const levelDiff = idx; // No currentLevel focus, so use index for gradient
-                const opacity = Math.max(this.options.maxOpacity - levelDiff * this.options.spaceOpacityStep, this.options.minOpacity);
-                level.style.opacity = opacity;
-            });
-        },
-        _updateSizes: function() {
-            const rect = this.DOM.map.getBoundingClientRect();
-            this.sizes = {
-                width: rect.width,
-                height: rect.height
-            };
-            this.DOM.map.style.perspective = `${this.options.perspective}px`;
-            this.DOM.map.style.perspectiveOrigin = '50% 50%';
-        },
-        _updateTransform: function(ev) {
-            const mousepos = getMousePos(ev);
-            const docScrolls = {
-                left: document.body.scrollLeft + document.documentElement.scrollLeft,
-                top: document.body.scrollTop + document.documentElement.scrollTop
-            };
-            const rect = this.DOM.map.getBoundingClientRect();
-            const mapCenter = {
-                x: rect.left + rect.width / 2,
-                y: rect.top + rect.height / 2
-            };
-            const relmousepos = {
-                x: mousepos.x - mapCenter.x + docScrolls.left,
-                y: mousepos.y - mapCenter.y + docScrolls.top
-            };
-            const maxRotX = 60; // Reduced for smaller map
-            const maxRotY = 5;  // Reduced for smaller map
-            const rotX = (relmousepos.y / (rect.height / 2)) * maxRotX;
-            const rotY = (relmousepos.x / (rect.width / 2)) * maxRotY;
-            this.DOM.levels.style.transform = `rotateX(${maxRotX - rotX}deg) rotateY(${rotY}deg) translateZ(-10px)`;
-        },
-        _openContent: function(data) {
-            if (this.isContentOpen) {
-                return;
-            }
-            const contentItem = this.DOM.contentItems.find(item => item.id === `content-${data.space}`);
-            if (contentItem) {
-                contentItem.classList.add('content__item--current');
-                this.isContentOpen = true;
-            }
-        },
-        _closeContent: function() {
-            if (!this.isContentOpen) {
-                return;
-            }
-            const currentContent = this.DOM.content.querySelector('.content__item--current');
-            if (currentContent) {
-                currentContent.classList.remove('content__item--current');
-                this.isContentOpen = false;
-            }
-        },
-        _layout: function() {
-            // Initialize CSS transformations
-            this.DOM.levels.style.transform = `rotateX(60deg) rotateZ(-45deg) translateZ(-10px)`;
+
+        processFloors(floors) {
+            return floors.map((floor, idx) => {
+                let refRoom = floor.rooms.find(r => !r.neighbours || r.neighbours.every(n => n.neighbouring.endsWith('IN')));
+                if (!refRoom && floor.rooms.length === 1 && floor.rooms[0].neighbours?.[0]?.neighbouring.endsWith('IN')) {
+                    alert(`Floor ${idx} with room ${floor.rooms[0].name} not generated properly due to unresolved inner neighbour`);
+                    return null;
+                }
+                if (!refRoom) refRoom = floor.rooms[0];
+                if (!refRoom.x && !refRoom.y) { refRoom.x = 0; refRoom.y = 0; }
+
+                const processedRooms = new Map();
+                processedRooms.set(refRoom.name, { ...refRoom, x: refRoom.x, y: refRoom.y });
+
+                function calculateCoords(room, parent) {
+                    if (processedRooms.has(room.name)) return;
+                    const parentRoom = processedRooms.get(parent.neighbour);
+                    if (!parentRoom) return;
+
+                    let x = parentRoom.x, y = parentRoom.y;
+                    const pw = parentRoom.width || 0, ph = parentRoom.height || 0;
+                    const rw = room.width || 0, rh = room.height || 0;
+
+                    switch (parent.neighbouring.toUpperCase()) {
+                        case 'TOPLEFT': x -= rw; y -= rh; break;
+                        case 'TOPRIGHT': x += pw; y -= rh; break;
+                        case 'BOTTOMLEFT': x -= rw; y += ph; break;
+                        case 'BOTTOMRIGHT': x += pw; y += ph; break;
+                        case 'TOPLEFTIN': x += 1; y += 1; break;
+                        case 'TOPRIGHTIN': x += pw - rw - 1; y += 1; break;
+                        case 'BOTTOMLEFTIN': x += 1; y += ph - rh - 1; break;
+                        case 'BOTTOMRIGHTIN': x += pw - rw - 1; y += ph - rh - 1; break;
+                    }
+                    processedRooms.set(room.name, { ...room, x, y });
+                }
+
+                floor.rooms.forEach(room => {
+                    if (room.neighbours) room.neighbours.forEach(n => calculateCoords(room, n));
+                });
+
+                let minX = Math.min(...Array.from(processedRooms.values(), r => r.x));
+                let minY = Math.min(...Array.from(processedRooms.values(), r => r.y));
+                let maxX = Math.max(...Array.from(processedRooms.values(), r => r.x + (r.width || 0)));
+                let maxY = Math.max(...Array.from(processedRooms.values(), r => r.y + (r.height || 0)));
+
+                if (minX < 0 || minY < 0) {
+                    Array.from(processedRooms.values()).forEach(r => {
+                        r.x -= minX; r.y -= minY;
+                    });
+                    maxX -= minX; maxY -= minY;
+                }
+
+                if (maxX > this.containerWidth || maxY > this.containerHeight) {
+                    const scaleX = this.containerWidth / maxX;
+                    const scaleY = this.containerHeight / maxY;
+                    const scale = Math.min(scaleX, scaleY);
+                    Array.from(processedRooms.values()).forEach(r => {
+                        r.x *= scale; r.y *= scale;
+                        r.width = (r.width || 0) * scale;
+                        r.height = (r.height || 0) * scale;
+                    });
+                }
+
+                return { ...floor, rooms: Array.from(processedRooms.values()) };
+            }).filter(f => f !== null);
+        },
+
+        generateSVG() {
+            let svgContent = `
+                <svg width="150" height="400" viewBox="0 0 150 300" style="background:#FDFDFD; z-index:9999;" xmlns="http://www.w3.org/2000/svg">
+                    <g class="map__symbols">
+                        <symbol id="icon-pin" width="8px" class="map__pin" viewBox="0 0 24 24">
+                            <path d="M12,2a8,8,0,0,0-8,8c0,5.09,7,13,8,13s8-7.91,8-13A8,8,0,0,0,12,2Zm0,11a3,3,0,1,1,3-3A3,3,0,0,1,12,13Z"/>
+                        </symbol>
+                        <symbol id="icon-cross" class="icon icon--cross" viewBox="0 0 24 24">
+                            <path d="M19,6.41,17.59,5,12,10.59,6.41,5,5,6.41,10.59,12,5,17.59,6.41,19,12,13.41,17.59,19,19,17.59,13.41,12Z"/>
+                        </symbol>
+                        <symbol id="icon-levels" class="icon icon--levels" viewBox="0 0 24 24">
+                            <path d="M21,16H3V4H21M21,2H3A2,2 0 0,0 1,4V16A2,2 0 0,0 3,18H10V20H8V22H16V20H14V18H21A2,2 0 0,0 23,16Z"/>
+                        </symbol>
+                        <symbol id="icon-prev" class="icon icon--prev" viewBox="0 0 24 24">
+                            <path d="M12 8V16L6 12L12 8Z"/>
+                        </symbol>
+                        <symbol id="icon-next" class="icon icon--next" viewBox="0 0 24 24">
+                            <path d="M12 16V8L18 12L12 16Z"/>
+                        </symbol>
+                    </g>
+            `;
+            this.floors.forEach((floor, index) => {
+                svgContent += `<g id="level${index}" class="map__level map__level--${index + 1}" data-level="${index}">`;
+                floor.rooms.forEach((room, rIdx) => {
+                    const color = generateColor(rIdx);
+                    const points = [
+                        [room.x, room.y], [room.x + room.width / 2, room.y], [room.x + room.width, room.y],
+                        [room.x + room.width, room.y + room.height / 2], [room.x + room.width, room.y + room.height],
+                        [room.x + room.width / 2, room.y + room.height], [room.x, room.y + room.height],
+                        [room.x, room.y + room.height / 2]
+                    ];
+                    room.points = points;
+                    svgContent += `
+                        <polygon class="map__space" points="${points.map(p => p.join(',')).join(' ')}"
+                            fill="${color}" stroke="${color}" stroke-width="0.2"
+                            data-name="${room.name}" data-level="${index}" data-space="${index}-${rIdx}"/>
+                    `;
+                    points.forEach((p, pIdx) => {
+                        svgContent += `<circle class="drag-point" cx="${p[0]}" cy="${p[1]}" r="2" data-space="${index}-${rIdx}" data-point="${pIdx}"/>`;
+                    });
+                    const pinsForRoom = this.pins.find(p => p[room.name])?.[room.name] || [];
+                    pinsForRoom.forEach(pin => {
+                        svgContent += `
+                            <use class="map__pin icon icon--pin" href="#icon-pin" x="${room.x + pin.x}" y="${room.y + pin.y}"
+                                data-space="${index}-${rIdx}" data-pin-x="${pin.x}" data-pin-y="${pin.y}"/>
+                        `;
+                    });
+                });
+                svgContent += '</g>';
+            });
+            svgContent += '</svg>';
+            this.svgContent = svgContent;
+        },
+
+        generateContentPopups() {
+            let contentContent = '';
+            this.floors.forEach((floor, floorIdx) => {
+                floor.rooms.forEach((room, roomIdx) => {
+                    contentContent += `
+                        <div class="content__item" id="content-${floorIdx}-${roomIdx}">
+                            <h2 class="content__item-title">${room.name}</h2>
+                            <p class="content__item-details">Details for ${room.name}</p>
+                            <button class="content__button"><svg class="icon icon--cross"><use href="#icon-cross"></use></svg></button>
+                        </div>
+                    `;
+                });
+            });
+            this.contentContent = contentContent;
+        },
+
+        _initEvents() {
+            this.DOM.map.addEventListener('mousemove', (ev) => requestAnimationFrame(() => this._updateTransform(ev)));
+            window.addEventListener('resize', () => requestAnimationFrame(() => this._updateSizes()));
+            this.DOM.spaces.forEach(space => {
+                let offsetX, offsetY;
+                space.addEventListener('mousedown', (ev) => {
+                    offsetX = ev.offsetX; offsetY = ev.offsetY;
+                    space.style.cursor = 'move';
+                });
+                space.addEventListener('dragstart', (ev) => ev.preventDefault());
+                document.addEventListener('mousemove', (ev) => {
+                    if (offsetX === undefined) return;
+                    const room = this.floors[space.dataset.level].rooms[space.dataset.space.split('-')[1]];
+                    let newX = ev.clientX - offsetX - this.DOM.map.getBoundingClientRect().left;
+                    let newY = ev.clientY - offsetY - this.DOM.map.getBoundingClientRect().top;
+                    newX = Math.max(0, Math.min(newX, this.containerWidth - room.width));
+                    newY = Math.max(0, Math.min(newY, this.containerHeight - room.height));
+                    room.x = newX; room.y = newY;
+                    room.points.forEach(p => { p[0] += newX - room.points[0][0]; p[1] += newY - room.points[0][1]; });
+                    this.updateRoom(space, room);
+                });
+                document.addEventListener('mouseup', () => {
+                    if (offsetX !== undefined) {
+                        offsetX = undefined;
+                        space.style.cursor = 'move';
+                        this.saveFloors();
+                    }
+                });
+                space.addEventListener('dblclick', (ev) => {
+                    const room = this.floors[space.dataset.level].rooms[space.dataset.space.split('-')[1]];
+                    const pinX = ev.offsetX - room.x, pinY = ev.offsetY - room.y;
+                    let roomPins = this.pins.find(p => p[room.name]);
+                    if (!roomPins) {
+                        roomPins = { [room.name]: [] };
+                        this.pins.push(roomPins);
+                    }
+                    roomPins[room.name].push({ x: pinX, y: pinY, type: "default", description: "" });
+                    this.generateSVG();
+                    this.DOM.levels.innerHTML = this.svgContent;
+                    this.savePins();
+                });
+                space.addEventListener('click', (ev) => {
+                    ev.preventDefault();
+                    this.DOM.spaces.forEach(s => s.classList.remove('map__space--selected'));
+                    space.classList.add('map__space--selected');
+                    const data = this._getSpaceData(space);
+                    const pin = this.DOM.pins.find(p => p.getAttribute('data-space') === space.getAttribute('data-space'));
+                    if (pin) {
+                        this.showPin(pin);
+                        this.DOM.pins.forEach(p => { if (p !== pin) this.hidePin(p); });
+                    }
+                    this._openContent(data);
+                });
+            });
+            this.DOM.levels.querySelectorAll('.drag-point').forEach(point => {
+                let offsetX, offsetY;
+                point.addEventListener('mousedown', (ev) => {
+                    offsetX = ev.offsetX; offsetY = ev.offsetY;
+                    ev.stopPropagation();
+                });
+                document.addEventListener('mousemove', (ev) => {
+                    if (offsetX === undefined) return;
+                    const space = this.DOM.spaces.find(s => s.dataset.space === point.dataset.space);
+                    const room = this.floors[space.dataset.level].rooms[space.dataset.space.split('-')[1]];
+                    const pIdx = parseInt(point.dataset.point);
+                    const newX = ev.clientX - offsetX - this.DOM.map.getBoundingClientRect().left;
+                    const newY = ev.clientY - offsetY - this.DOM.map.getBoundingClientRect().top;
+                    room.points[pIdx] = [newX, newY];
+                    this.updateRoom(space, room);
+                });
+                document.addEventListener('mouseup', () => {
+                    if (offsetX !== undefined) {
+                        offsetX = undefined;
+                        this.saveFloors();
+                    }
+                });
+            });
+            this.DOM.btnPrev.addEventListener('click', () => {
+                if (this.currentLevel > 0) this.showLevel(this.currentLevel - 1);
+            });
+            this.DOM.btnNext.addEventListener('click', () => {
+                if (this.currentLevel < this.levels - 1) this.showLevel(this.currentLevel + 1);
+                else if (this.currentLevel === -1) this.showLevel(0);
+            });
+            this.DOM.levelIndicator.addEventListener('click', () => this.showAllLevels());
+            this.DOM.resetFloors.addEventListener('click', () => resetDB("floors").then(() => location.reload()));
+            this.DOM.resetPins.addEventListener('click', () => resetDB("pins").then(() => location.reload()));
+            this.DOM.contentItems.forEach(item => {
+                item.querySelector('.content__button').addEventListener('click', () => this._closeContent());
+            });
+        },
+
+        updateRoom(space, room) {
+            space.setAttribute('points', room.points.map(p => p.join(',')).join(' '));
+            this.DOM.levels.querySelectorAll(`.drag-point[data-space="${space.dataset.space}"]`).forEach((p, idx) => {
+                p.setAttribute('cx', room.points[idx][0]);
+                p.setAttribute('cy', room.points[idx][1]);
+            });
+        },
+
+        async saveFloors() {
+            await saveToDB("floors", this.floors);
+            const event = new CustomEvent('floorStructureUpdated', { detail: this.floors });
+            document.dispatchEvent(event);
+        },
+
+        async savePins() {
+            await saveToDB("pins", this.pins);
+            const event = new CustomEvent('pinsStructureUpdated', { detail: this.pins });
+            document.dispatchEvent(event);
+        },
+
+        showPin(pin) {
+            pin.classList.add('map__pin--active');
+            onEndTransition(pin, () => {
+                pin.style.transition = ''; // Reset transition after completion
+            });
+        },
+
+        hidePin(pin) {
+            pin.classList.remove('map__pin--active');
+            onEndTransition(pin, () => {
+                pin.style.transition = ''; // Reset transition after completion
+            });
+        },
+
+        showLevel(level) {
+            this.currentLevel = level;
+            this.DOM.levelIndicator.innerHTML = `<svg class="icon icon--levels"><use href="#icon-levels"></use></svg> ${level + 1}`;
+            this.DOM.levelEls.forEach((levelEl, idx) => {
+                levelEl.style.opacity = idx === level ? this.options.maxOpacity : 0;
+                levelEl.style.transform = `translateZ(${(idx - level) * 40}px)`;
+                onEndTransition(levelEl, () => {
+                    levelEl.style.transition = ''; // Reset transition after completion
+                    if (idx !== level) levelEl.style.visibility = 'hidden'; // Hide non-active levels
+                    else levelEl.style.visibility = 'visible';
+                });
+                levelEl.style.visibility = 'visible'; // Ensure visible during transition
+            });
+        },
+
+        showAllLevels() {
+            this.currentLevel = -1;
+            this.DOM.levelIndicator.innerHTML = `<svg class="icon icon--levels"><use href="#icon-levels"></use></svg>`;
             this.DOM.levelEls.forEach((level, idx) => {
-                level.style.transform = `
-                      rotateZ(${idx * 0}deg)
-                      translateY(-${idx * 0}px)
-                      translateZ(${idx * 0}px)
-                `;
+                const opacity = Math.max(this.options.maxOpacity - idx * this.options.spaceOpacityStep, this.options.minOpacity);
+                level.style.opacity = opacity;
+                level.style.transform = `translateZ(${idx * 40}px)`;
+                onEndTransition(level, () => {
+                    level.style.transition = ''; // Reset transition after completion
+                    level.style.visibility = 'visible'; // Ensure all levels remain visible
+                });
+                level.style.visibility = 'visible'; // Ensure visible during transition
             });
-            this.DOM.spaces.forEach((space, idx) => {
-                space.style.background = `#${idx*33}0000`;
-            });
-            // Set initial sizes and opacities
-            this._updateSizes();
-            this._updateOpacityLevels();
-            // Animate pins
-            this.DOM.pins.forEach(pin => pin.classList.add('map__pin--active'));
-        },
-        _getSpaceData: function(space) {
-            return {
-                level: parseInt(space.getAttribute('data-level'), 10),
-                space: space.getAttribute('data-space')
-            };
-        }
-    };
-    // Initialize the map
-    (function() {
-        const mapEl = document.querySelector('.container');
-        const mallMap = new MallMap(mapEl, {
-            perspective: 1000,
-            spaceOpacityStep: 0.2,
-            maxOpacity: 1,
-            minOpacity: 0.3
-        });
-    })();
+        },
+
+        _updateSizes() {
+            const rect = this.DOM.map.getBoundingClientRect();
+            this.sizes = { width: rect.width, height: rect.height };
+            this.DOM.map.style.perspective = `${this.options.perspective}px`;
+            this.DOM.map.style.perspectiveOrigin = '50% 50%';
+        },
+
+        _updateTransform(ev) {
+            const mousepos = { x: ev.pageX, y: ev.pageY };
+            const rect = this.DOM.map.getBoundingClientRect();
+            const mapCenter = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+            const relmousepos = { x: mousepos.x - mapCenter.x, y: mousepos.y - mapCenter.y };
+            const maxRotX = 60, maxRotY = 5;
+            const rotX = (relmousepos.y / (rect.height / 2)) * maxRotX;
+            const rotY = (relmousepos.x / (rect.width / 2)) * maxRotY;
+            this.DOM.levels.style.transform = `rotateX(${maxRotX - rotX}deg) rotateY(${rotY}deg) translateZ(-10px)`;
+        },
+
+        _openContent(data) {
+            if (this.isContentOpen) return;
+            const contentItem = this.DOM.contentItems.find(item => item.id === `content-${data.space}`);
+            if (contentItem) {
+                contentItem.classList.add('content__item--current');
+                onEndTransition(contentItem, () => {
+                    contentItem.style.transition = ''; // Reset transition after completion
+                    this.isContentOpen = true;
+                });
+            }
+        },
+
+        _closeContent() {
+            if (!this.isContentOpen) return;
+            const currentContent = this.DOM.content.querySelector('.content__item--current');
+            if (currentContent) {
+                currentContent.classList.remove('content__item--current');
+                onEndTransition(currentContent, () => {
+                    currentContent.style.transition = ''; // Reset transition after completion
+                    this.isContentOpen = false;
+                });
+            }
+        },
+
+        _layout() {
+            this.DOM.levels.style.transform = `rotateX(60deg) rotateZ(-45deg) translateZ(-10px)`;
+            this._updateSizes();
+            this.showAllLevels();
+            this.DOM.pins.forEach(pin => this.hidePin(pin));
+        },
+
+        _getSpaceData(space) {
+            return {
+                level: parseInt(space.getAttribute('data-level'), 10),
+                space: space.getAttribute('data-space')
+            };
+        }
+    };
+
+    // DOM Setup
+    const container = document.createElement('div');
+    container.className = 'container';
+    container.innerHTML = `
+        <div class="map"><div class="map__levels" id="map-levels"></div></div>
+        <div class="sidebar">
+            <div class="controls">
+                <button class="controls__btn controls__btn--prev"><svg class="icon icon--prev"><use href="#icon-prev"></use></svg></button>
+                <span class="controls__level"></span>
+                <button class="controls__btn controls__btn--next"><svg class="icon icon--next"><use href="#icon-next"></use></svg></button>
+                <button class="controls__btn controls__btn--reset-floors">Reset Floors</button>
+                <button class="controls__btn controls__btn--reset-pins">Reset Pins</button>
+            </div>
+            <div class="locations" id="locations"><ul class="locations__list"></ul></div>
+        </div>
+        <div class="content" id="content"></div>
+    `;
+    document.documentElement.insertBefore(container, document.body);
+
+    // Initialize MallMap
+    const mallMap = new MallMap(container, defaultFloors);
 })();
