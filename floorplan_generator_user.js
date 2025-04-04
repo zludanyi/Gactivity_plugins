@@ -1,10 +1,9 @@
 // ==UserScript==
 // @name         Floorplan Manager (Async Processing/Render)
-// @namespace    http://tampermonkey.net/
 // @version      0.8
 // @description  Async OpenCV processing & D3 rendering within requestAnimationFrame.
-// @author       You (modified by AI)
-// @match        *://*/*
+// @author       ZLudany
+// @match        https://home.google.com/*
 // @grant        GM_addStyle
 // ==/UserScript==
 (function() {
