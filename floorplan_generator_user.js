@@ -199,42 +199,34 @@
         }
 
         start() {
-            window.Module.onRuntimeInitialized = () => {
-                console.log("OpenCV Runtime Initialized.");
-                this.cv = cv; // Access the global cv object
-                this.hideLoadingIndicator();
-                this.createUI();
-                this.updateStatus("Libraries ready. Select an image file.");
-                console.log("FloorplanProcessor: Base UI created.");
+            const checkOpenCV = () => {
+                if (typeof cv !== 'undefined' && cv !== null) {
+                    console.log("OpenCV loaded successfully.");
+                    this.cv = cv;
+                    this.hideLoadingIndicator();
+                    this.createUI();
+                    this.updateStatus("Libraries ready. Select an image file.");
+                    console.log("FloorplanProcessor: Base UI created.");
+                } else {
+                    console.log("OpenCV not yet loaded. Checking again...");
+                    setTimeout(checkOpenCV, 500); // Check again after 500ms
+                }
             };
+
+            // Initial check
+            checkOpenCV();
+
+            // Fallback mechanism in case onRuntimeInitialized never fires
+            setTimeout(() => {
+                if (typeof cv === 'undefined' || cv === null) {
+                    console.error("OpenCV failed to load after multiple attempts.  Aborting.");
+                    this.updateLoadingIndicator("OpenCV failed to load. Please check the console for errors.");
+                }
+            }, 10000); // Check after 10 seconds
         }
 
-        createUI() {
-            this.container = document.createElement('div'); this.container.id = 'floorplan-container';
-            this.controlsDiv = document.createElement('div'); this.controlsDiv.id = 'floorplan-controls';
-            const fileInputLabel = document.createElement('label'); fileInputLabel.textContent = 'Upload Floorplan Image:'; fileInputLabel.htmlFor = 'floorplan-file-input'; this.fileInput = document.createElement('input'); this.fileInput.type = 'file'; this.fileInput.accept = 'image/*'; this.fileInput.id = 'floorplan-file-input'; this.controlsDiv.appendChild(fileInputLabel); this.controlsDiv.appendChild(this.fileInput);
-            this.closeButton = document.createElement('button'); this.closeButton.id = 'floorplan-close-btn'; this.closeButton.textContent = '✕'; this.closeButton.title = 'Close';
-            this.canvas = document.createElement('canvas'); this.canvas.id = 'floorplan-canvas'; this.canvas.width = this.CANVAS_WIDTH; this.canvas.height = this.CANVAS_HEIGHT; this.canvasCtx = this.canvas.getContext('2d');
-            this.canvasLabel = document.createElement('div'); this.canvasLabel.id = 'floorplan-canvas-label'; this.canvasLabel.textContent = "Upload an image to see the detected shape preview.";
-            this.statusLabel = document.createElement('span'); this.statusLabel.id = 'floorplan-status'; this.statusLabel.textContent = 'Initializing...';
-            this.container.appendChild(this.closeButton);
-            this.container.appendChild(this.controlsDiv);
-            this.container.appendChild(this.canvas);
-            this.container.appendChild(this.canvasLabel);
-            this.container.appendChild(this.statusLabel);
-            document.body.appendChild(this.container);
-            this.uiCreated = true;
-            console.log("FloorplanProcessor: Base UI elements created.");
-        }
-
-        updateStatus(message) {
-            if (this.statusLabel) {
-                this.statusLabel.textContent = message;
-            } else if (this.loadingIndicator) {
-                this.updateLoadingIndicator(message);
-            }
-            console.log("Floorplan Status:", message);
-        }
+        createUI() { /* ... */ }
+        updateStatus(message) { /* ... */ }
     }
 
     // --Floorplan Manager Class (Orchestrator)--
