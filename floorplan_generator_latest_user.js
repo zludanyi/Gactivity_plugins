@@ -64,7 +64,7 @@
         function updateIframeStatus(message) {
             const statusEl = document.getElementById('iframe-status');
             if (statusEl) statusEl.textContent = "Iframe: " + message;
-            console.log("Iframe Status:", message); // Log within iframe console
+            alert("Iframe Status:", message); // Log within iframe console
         }
 
         // Simple script loader within iframe
