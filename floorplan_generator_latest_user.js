@@ -715,7 +715,6 @@
 
 
     // --- Instantiate the Manager ---
-    console.log("Instantiating FloorplanManager (Iframe Version)...");
     try {
         if (typeof d3 === 'undefined') throw new Error("D3 is not defined.");
         new FloorplanManager();
@@ -724,6 +723,5 @@
          console.error("Critical error during script startup:", error);
          alert(`Critical Error: ${error.message}. Floorplan Manager cannot start.`);
     }
-    console.log("--- Floorplan Manager (Iframe Strategy) Execution Finished ---");
 
 })(); // End IIFE
