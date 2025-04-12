@@ -434,7 +434,7 @@
             this.showLoadingIndicator("Initializing OpenCV Processor (Iframe)...");
             this.setupIframe();
             this.setupMessageListener();
-            console.log("FloorplanManager constructor finished.");
+            alert("FloorplanManager constructor finished.");
         }
 
         // --- Loading Indicator Management --- (Copied from previous Processor)
@@ -476,7 +476,7 @@
 
 
         setupIframe() {
-            console.log("Setting up iframe...");
+            alert("Setting up iframe...");
             this.iframe = document.createElement('iframe');
             this.iframe.id = IFRAME_ID;
             this.iframe.src = 'about:blank';
@@ -484,13 +484,13 @@
             document.body.appendChild(this.iframe);
 
             this.iframe.onload = () => {
-                 console.log("Iframe loaded ('about:blank'). Injecting content...");
+                 alert("Iframe loaded ('about:blank'). Injecting content...");
                  try {
                      // Inject the HTML and script content
                      this.iframe.contentWindow.document.open();
                      this.iframe.contentWindow.document.write(iframeContent);
                      this.iframe.contentWindow.document.close();
-                     console.log("Iframe content injected.");
+                     alert("Iframe content injected.");
                      // Now wait for the 'opencv_ready' message from the iframe script
                  } catch (error) {
                       console.error("Error injecting content into iframe:", error);
@@ -523,14 +523,14 @@
 
                 switch (message.type) {
                     case 'opencv_ready':
-                        console.log("Parent: Received opencv_ready message from iframe.");
+                        alert("Parent: Received opencv_ready message from iframe.");
                         this.isIframeReady = true;
                         this.hideLoadingIndicator(); // Hide main loader
                         this.container.style.display = 'flex'; // Show main UI
                         this.updateStatus("Ready. Select floorplan image.");
                         break;
                     case 'processing_complete':
-                        console.log("Parent: Received processing_complete message.");
+                        alert("Parent: Received processing_complete message.");
                         this.updateStatus("Processing complete. Rendering SVG...");
                         if (message.payload && message.payload.contours) {
                             // Call the inherited render method from FloorplanCreator
@@ -551,13 +551,13 @@
                         }
                         break;
                     case 'processing_error':
-                        console.error("Parent: Received processing_error message from iframe:", message.payload.message);
+                        alert("Parent: Received processing_error message from iframe:", message.payload.message);
                         this.updateStatus(`Processing Error: ${message.payload.message}`);
                         this.showCanvas(); // Show preview canvas on error
                         this.destroy(); // Destroy any potentially partial SVG (inherited method)
                         break;
                     case 'status_update': // Optional: iframe can send status updates
-                        console.log("Parent: Received status_update from iframe:", message.payload.message);
+                        alert("Parent: Received status_update from iframe:", message.payload.message);
                         this.updateStatus(message.payload.message); // Update parent status label
                         break;
                     default:
@@ -723,8 +723,6 @@
     } catch (error) {
          console.error("Critical error during script startup:", error);
          alert(`Critical Error: ${error.message}. Floorplan Manager cannot start.`);
-         // Attempt to show persistent error message using standalone indicator
-         try { showStandaloneLoadingIndicator(`Startup Error: ${error.message}`); } catch(e){}
     }
     console.log("--- Floorplan Manager (Iframe Strategy) Execution Finished ---");
 
