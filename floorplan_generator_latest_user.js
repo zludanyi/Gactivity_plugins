@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Floorplan Manager (Worker OpenCV + Dev Mode - Formatted v2)
-// @version      1.1.1
-// @description  Uses Web Worker for OpenCV, separate dev modes, standard style injection, formatted.
+// @name         Floorplan Manager (Worker OpenCV Fetch + Dev Mode - Formatted v3)
+// @version      1.1.3
+// @description  Uses Web Worker/fetch for OpenCV, separate dev modes, standard style injection, formatted.
 // @author       ZLudany
 // @match        https://home.google.com/*
 // @grant        none
@@ -73,7 +73,7 @@
     }
     // --- End Parent Logging Helpers ---
 
-    logDebug(`--- Floorplan Manager (Worker Strategy, Parent Dev: ${PARENT_DEV_MODE}, Worker Dev: ${WORKER_DEV_MODE}) Execution Starting ---`);
+    logDebug(`--- Floorplan Manager (Worker/Fetch Strategy, Parent Dev: ${PARENT_DEV_MODE}, Worker Dev: ${WORKER_DEV_MODE}) Execution Starting ---`);
 
     // --- Constants ---
     const OPENCV_URL = 'https://docs.opencv.org/4.5.4/opencv.js';
@@ -221,39 +221,32 @@
         const OPENCV_URL = '${OPENCV_URL}';
         // --- End Worker Configuration ---
 
-        // --- Worker Logging Helpers ---
-        function logDebug(message, ...optionalParams) {
-            const prefix = "[WORKER DEBUG]";
-            if (WORKER_DEV_MODE) {
-                console.log(prefix, message, ...optionalParams);
-                // Example of posting for alert:
-                // self.postMessage({ type: 'log_alert', payload: { level: 'debug', message: prefix + " " + message } });
+        // --- Worker Function Call Helper ---
+        function callParentFunction(functionName, ...args) {
+            const targetFunctionName = WORKER_DEV_MODE && functionName.startsWith('log') ? 'alert' : functionName;
+            const finalArgs = WORKER_DEV_MODE && functionName.startsWith('log') ? ["[WORKER " + functionName.toUpperCase() + "] " + args[0]].concat(args.slice(1)) : args;
+            if (targetFunctionName === 'alert') {
+                 let alertMsg = args.join(' ');
+                 self.postMessage({
+                     type: "functionCall",
+                     payload: {
+                         functionName: 'alert',
+                         args: [alertMsg]
+                     }
+                 });
             } else {
-                console.log(prefix, message, ...optionalParams);
+                 self.postMessage({
+                     type: "functionCall",
+                     payload: {
+                         functionName: functionName,
+                         args: args
+                     }
+                 });
             }
         }
-        function logWarn(message, ...optionalParams) {
-            const prefix = "[WORKER WARN]";
-            const fullMessage = prefix + " " + message;
-            if (WORKER_DEV_MODE) {
-                console.warn(fullMessage, ...optionalParams); /* Post alert if needed */
-            } else {
-                console.warn(fullMessage, ...optionalParams);
-            }
-        }
-        function logError(message, ...optionalParams) {
-            const prefix = "[WORKER ERROR]";
-            const fullMessage = prefix + " " + message;
-            if (WORKER_DEV_MODE) {
-                console.error(fullMessage, ...optionalParams); /* Post alert if needed */
-            } else {
-                console.error(fullMessage, ...optionalParams);
-            }
-            self.postMessage({ type: 'processing_error', payload: { message: message + (optionalParams.length ? ' Details in worker console.' : '') } });
-        }
-        // --- End Worker Logging Helpers ---
+        // --- End Worker Function Call Helper ---
 
-        logDebug("Worker script started.");
+        callParentFunction('logDebug', "Worker script started.");
 
         let cv = null;
         let isReady = false;
@@ -261,62 +254,98 @@
         // Define Module for OpenCV initialization
         self.Module = {
             onRuntimeInitialized: () => {
-                logDebug("OpenCV Runtime Initialized in Worker.");
-                if (typeof self.cv !== 'undefined' && self.cv.imread) {
+                callParentFunction('logDebug', ">>> Module.onRuntimeInitialized fired.");
+                if (isReady) {
+                    callParentFunction('logDebug', "Worker already marked as ready, onRuntimeInitialized just confirms.");
+                    return;
+                }
+
+                callParentFunction('logDebug', "Checking cv.imread within onRuntimeInitialized...");
+                if (typeof self.cv !== 'undefined' && self.cv && typeof self.cv.imread === 'function') {
                     cv = self.cv;
                     isReady = true;
-                    logDebug("OpenCV is ready in Worker.");
+                    callParentFunction('logDebug', "OpenCV is ready in Worker (confirmed by onRuntimeInitialized).");
                     self.postMessage({ type: 'opencv_ready' });
                 } else {
-                    logError("Worker: onRuntimeInitialized called, but cv or cv.imread is invalid!");
+                    callParentFunction('logError', "Worker: onRuntimeInitialized fired, but cv or cv.imread is STILL invalid!");
                 }
             },
             onAbort: (reason) => {
-                 logError("Worker OpenCV WASM Aborted:", reason);
+                 callParentFunction('logError', "Worker OpenCV WASM Aborted:", reason);
                  isReady = false;
             }
         };
-        logDebug("Worker: Module defined. Importing OpenCV script...");
+        callParentFunction('logDebug', "Worker: Module defined. Preparing to fetch OpenCV script...");
 
-        try {
-            importScripts(OPENCV_URL);
-            logDebug("Worker: importScripts called for OpenCV.");
-        } catch (error) {
-            logError("Worker: Failed to import OpenCV script:", error);
-            isReady = false;
+        // --- Fetch and Execute OpenCV ---
+        async function loadAndExecuteOpenCV() {
+            callParentFunction('logDebug', "Worker: Fetching OpenCV script via fetch()...");
+            callParentFunction('updateStatus', "Worker: Fetching OpenCV...");
+            try {
+                const response = await fetch(OPENCV_URL);
+                callParentFunction('logDebug', \`Worker: Fetch response status: \${response.status}\`);
+                if (!response.ok) {
+                    throw new Error(\`HTTP error! Status: \${response.status} \${response.statusText}\`);
+                }
+                const scriptText = await response.text();
+                callParentFunction('logDebug', \`Worker: OpenCV script fetched successfully (\${scriptText.length} chars). Executing...\`);
+                callParentFunction('updateStatus', "Worker: Executing OpenCV Script...");
+
+                new Function(scriptText)();
+                callParentFunction('logDebug', "Worker: OpenCV script executed. Checking for cv.imread immediately...");
+
+                // --- IMMEDIATE CHECK ---
+                if (typeof self.cv !== 'undefined' && self.cv && typeof self.cv.imread === 'function') {
+                    callParentFunction('logDebug', "Worker: cv.imread found immediately after execution.");
+                    cv = self.cv;
+                    isReady = true;
+                    callParentFunction('logDebug', "OpenCV marked as ready in Worker (immediate check).");
+                    self.postMessage({ type: 'opencv_ready' });
+                } else {
+                    callParentFunction('logWarn', "Worker: cv.imread NOT found immediately after execution. Relying on onRuntimeInitialized callback...");
+                    callParentFunction('updateStatus', "Worker: Waiting for OpenCV WASM initialization...");
+                }
+                // --- END IMMEDIATE CHECK ---
+
+            } catch (error) {
+                callParentFunction('logError', "Worker: Failed to fetch or execute OpenCV script:", error);
+                isReady = false;
+            }
         }
+
+        // Start the loading process
+        loadAndExecuteOpenCV();
+        // --- End Fetch and Execute ---
+
 
         // --- Message Handling ---
         self.onmessage = async (event) => {
-            logDebug("Worker received message:", event.data);
+            console.log("[WORKER INTERNAL] Received message:", event.data); // Keep console log
             const message = event.data;
-
             if (!message || !message.type) {
-                logWarn("Worker: Received message with no type.");
+                callParentFunction('logWarn', "Worker: Received message with no type.");
                 return;
             }
 
             if (message.type === 'process_image_blob') {
                 if (!isReady || !cv) {
-                    logError("Worker: Received image blob but OpenCV is not ready.");
+                    callParentFunction('logError', "Worker: Received image blob but OpenCV is not ready.");
                     return;
                 }
                 if (!(message.payload && message.payload.imageBlob instanceof Blob)) {
-                    logError("Worker: Invalid image blob received.");
+                    callParentFunction('logError', "Worker: Invalid image blob received.");
                     return;
                 }
-
                 await processImageBlob(message.payload.imageBlob);
-
             } else {
-                logWarn("Worker: Received unknown message type:", message.type);
+                callParentFunction('logWarn', "Worker: Received unknown message type:", message.type);
             }
         };
 
         // --- Image Processing Function ---
         async function processImageBlob(imageBlob) {
-            logDebug("Worker: Starting image blob processing.");
-            self.postMessage({ type: 'status_update', payload: { message: "Worker: Processing image..." } });
+            callParentFunction('logDebug', "Worker: Starting image blob processing.");
+            callParentFunction('updateStatus', "Worker: Processing image...");
 
             let src = null;
             let gray = null;
@@ -330,7 +359,7 @@
 
             try {
                 imageBitmap = await createImageBitmap(imageBlob);
-                logDebug(\`Worker: Created ImageBitmap \${imageBitmap.width}x\${imageBitmap.height}\`);
+                callParentFunction('logDebug', \`Worker: Created ImageBitmap \${imageBitmap.width}x\${imageBitmap.height}\`);
 
                 offscreenCanvas = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
                 ctx = offscreenCanvas.getContext('2d');
@@ -338,7 +367,7 @@
                     throw new Error("Could not get OffscreenCanvas 2D context.");
                 }
                 ctx.drawImage(imageBitmap, 0, 0);
-                logDebug("Worker: Image drawn to OffscreenCanvas.");
+                callParentFunction('logDebug', "Worker: Image drawn to OffscreenCanvas.");
                 imageBitmap.close();
 
                 src = cv.imread(offscreenCanvas);
@@ -354,10 +383,9 @@
                 contours = new cv.MatVector();
                 hierarchy = new cv.Mat();
                 cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-                logDebug(\`Worker: Found \${contours.size()} raw contours.\`);
+                callParentFunction('logDebug', \`Worker: Found \${contours.size()} raw contours.\`);
 
                 const minArea = 50;
-
                 for (let i = 0; i < contours.size(); ++i) {
                     const contour = contours.get(i);
                     try {
@@ -372,12 +400,12 @@
                          }
                          formattedContours.push({ id: \`worker-contour-\${Date.now()}-\${i}\`, points: pointsArray });
                     } finally {
-                         if(contour) {
-                             contour.delete();
-                         }
+                        if(contour) {
+                            contour.delete();
+                        }
                     }
                 }
-                logDebug(\`Worker: Processed \${formattedContours.length} valid contours.\`);
+                callParentFunction('logDebug', \`Worker: Processed \${formattedContours.length} valid contours.\`);
 
                 self.postMessage({
                     type: 'processing_complete',
@@ -389,7 +417,7 @@
                 });
 
             } catch (error) {
-                logError("Worker processing error:", error);
+                callParentFunction('logError', "Worker processing error:", error);
             } finally {
                 if (src) {
                     src.delete();
@@ -409,22 +437,13 @@
                 if (imageBitmap && !imageBitmap.closed) {
                     imageBitmap.close();
                 }
-                logDebug("Worker: OpenCV Mats cleaned up.");
+                callParentFunction('logDebug', "Worker: OpenCV Mats cleaned up.");
             }
         }
 
-        logDebug("Worker: Event listener set up. Waiting for messages or OpenCV init.");
-        self.postMessage({ type: 'status_update', payload: { message: "Worker: Initialized and waiting." } });
+        callParentFunction('logDebug', "Worker: Event listener set up. Waiting for messages or OpenCV load...");
 
     `; // End workerScriptContent
-
-
-    // --- Standalone Loading Indicator Helpers ---
-    // (Not used in this version as logging replaces visual indicators)
-    // function showStandaloneLoadingIndicator(message) { /* ... */ }
-    // function updateStandaloneLoadingIndicator(indicator, message) { /* ... */ }
-    // function hideStandaloneLoadingIndicator(indicator) { /* ... */ }
-    // --- End Standalone Helpers ---
 
 
     // --- Floorplan SVG Creator Class (Parent Scope) ---
@@ -629,7 +648,6 @@
         canvasCtx = null;
         canvasLabel = null;
         closeButton = null;
-        // No loadingIndicator element ref needed
 
         constructor() {
             logDebug("FloorplanManager constructor started.");
@@ -659,7 +677,7 @@
                 }
                 this.container = null;
                 this.uiCreated = false;
-                this.updateStatus(`Error Creating UI: ${e.message}`); // Use updateStatus which logs
+                this.updateStatus(`Error Creating UI: ${e.message}`);
                 throw new Error(`Failed to populate UI: ${e.message}`);
             }
             try {
@@ -680,7 +698,7 @@
                 }
                 this.container = null;
                 this.uiCreated = false;
-                this.updateStatus(`Error Displaying UI: ${e.message}`); // Use updateStatus
+                this.updateStatus(`Error Displaying UI: ${e.message}`);
                 throw new Error(`Failed to append UI: ${e.message}`);
             }
 
@@ -772,7 +790,7 @@
                     logDebug("Parent: Worker reported OpenCV is ready.");
                     this.isWorkerReady = true;
                     if (this.container) {
-                        this.container.style.display = 'flex'; // Show main UI
+                        this.container.style.display = 'flex';
                     } else {
                         logError("Cannot show container, reference missing after worker ready!");
                     }
@@ -799,14 +817,34 @@
                     }
                     break;
                 case 'processing_error':
-                    logError("Parent: Received processing_error message from worker:", message.payload.message);
+                    // Error is logged by the worker via functionCall below
                     this.updateStatus(`Processing Error: ${message.payload.message}`);
                     this.showCanvas();
-                    this.destroy(); // Destroy SVG
+                    this.destroy();
                     break;
-                case 'status_update':
-                    logDebug("Parent: Received status_update from worker:", message.payload.message);
-                    this.updateStatus(message.payload.message);
+                case 'functionCall':
+                    const { functionName, args } = message.payload;
+                    if (typeof functionName === 'string' && Array.isArray(args)) {
+                        logDebug(`Parent: Worker requested call: ${functionName}(${args.length} args)`);
+                        const targetFunction = this[functionName] || window[functionName];
+                        if (typeof targetFunction === 'function') {
+                            try {
+                                if (this[functionName]) {
+                                     targetFunction.apply(this, args);
+                                } else if (functionName === 'alert' && (PARENT_DEV_MODE || WORKER_DEV_MODE)) {
+                                     alert(args.join(' '));
+                                } else if (functionName.startsWith('log')) {
+                                     targetFunction(...args);
+                                }
+                            } catch (e) {
+                                logError(`Parent: Error executing requested worker function '${functionName}':`, e);
+                            }
+                        } else {
+                            logWarn(`Parent received request to call unknown/disallowed function from worker: ${functionName}`);
+                        }
+                    } else {
+                        logWarn("Parent received invalid functionCall message format from worker.");
+                    }
                     break;
                 default:
                     logWarn("Parent: Received unknown message type from worker:", message.type);
@@ -901,7 +939,7 @@
              if (this.canvasLabel) {
                  this.canvasLabel.style.display = 'block';
              }
-             this.destroy(); // Destroy SVG
+             this.destroy();
              logDebug("Manager: Canvas shown.");
          }
 
@@ -923,7 +961,7 @@
 
         closeUI() {
             logDebug("Manager: Closing UI and Worker...");
-            super.destroy(); // Calls FloorplanCreator destroy
+            super.destroy();
 
             if (this.worker) {
                 try {
@@ -951,7 +989,7 @@
 
 
     // --- Instantiate the Manager ---
-    logDebug("Instantiating FloorplanManager (Worker Version)...");
+    logDebug("Instantiating FloorplanManager (Worker/Fetch Version)...");
     try {
         if (typeof d3 === 'undefined') {
             throw new Error("D3 is not defined.");
@@ -963,6 +1001,6 @@
          alert(`Critical Error: ${error.message}. Floorplan Manager cannot start.`);
          // try { showStandaloneLoadingIndicator(`Startup Error: ${error.message}`); } catch(e){} // No indicator element
     }
-    logDebug(`--- Floorplan Manager (Worker Strategy, Parent Dev: ${PARENT_DEV_MODE}, Worker Dev: ${WORKER_DEV_MODE}) Execution Finished ---`);
+    logDebug(`--- Floorplan Manager (Worker/Fetch Strategy, Parent Dev: ${PARENT_DEV_MODE}, Worker Dev: ${WORKER_DEV_MODE}) Execution Finished ---`);
 
 })(); // End IIFE
