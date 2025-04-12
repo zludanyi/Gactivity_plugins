@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Floorplan Manager (Worker OpenCV Fetch + Dev Mode - Formatted v3)
-// @version      1.1.3
-// @description  Uses Web Worker/fetch for OpenCV, separate dev modes, standard style injection, formatted.
+// @name         Floorplan Manager (Worker OpenCV importScripts + Dev Mode - Formatted v4)
+// @version      1.1.5
+// @description  Uses Web Worker/importScripts for OpenCV, separate dev modes, standard style injection, formatted.
 // @author       ZLudany
 // @match        https://home.google.com/*
 // @grant        none
@@ -73,7 +73,7 @@
     }
     // --- End Parent Logging Helpers ---
 
-    logDebug(`--- Floorplan Manager (Worker/Fetch Strategy, Parent Dev: ${PARENT_DEV_MODE}, Worker Dev: ${WORKER_DEV_MODE}) Execution Starting ---`);
+    logDebug(`--- Floorplan Manager (Worker/importScripts Strategy, Parent Dev: ${PARENT_DEV_MODE}, Worker Dev: ${WORKER_DEV_MODE}) Execution Starting ---`);
 
     // --- Constants ---
     const OPENCV_URL = 'https://docs.opencv.org/4.5.4/opencv.js';
@@ -255,19 +255,13 @@
         self.Module = {
             onRuntimeInitialized: () => {
                 callParentFunction('logDebug', ">>> Module.onRuntimeInitialized fired.");
-                if (isReady) {
-                    callParentFunction('logDebug', "Worker already marked as ready, onRuntimeInitialized just confirms.");
-                    return;
-                }
-
-                callParentFunction('logDebug', "Checking cv.imread within onRuntimeInitialized...");
                 if (typeof self.cv !== 'undefined' && self.cv && typeof self.cv.imread === 'function') {
                     cv = self.cv;
                     isReady = true;
-                    callParentFunction('logDebug', "OpenCV is ready in Worker (confirmed by onRuntimeInitialized).");
+                    callParentFunction('logDebug', "OpenCV is ready in Worker (onRuntimeInitialized confirmed).");
                     self.postMessage({ type: 'opencv_ready' });
                 } else {
-                    callParentFunction('logError', "Worker: onRuntimeInitialized fired, but cv or cv.imread is STILL invalid!");
+                    callParentFunction('logError', "Worker: onRuntimeInitialized fired, but cv or cv.imread is invalid!");
                 }
             },
             onAbort: (reason) => {
@@ -275,48 +269,20 @@
                  isReady = false;
             }
         };
-        callParentFunction('logDebug', "Worker: Module defined. Preparing to fetch OpenCV script...");
+        callParentFunction('logDebug', "Worker: Module defined. Importing OpenCV script via importScripts()...");
+        callParentFunction('updateStatus', "Worker: Loading OpenCV...");
 
-        // --- Fetch and Execute OpenCV ---
-        async function loadAndExecuteOpenCV() {
-            callParentFunction('logDebug', "Worker: Fetching OpenCV script via fetch()...");
-            callParentFunction('updateStatus', "Worker: Fetching OpenCV...");
-            try {
-                const response = await fetch(OPENCV_URL);
-                callParentFunction('logDebug', \`Worker: Fetch response status: \${response.status}\`);
-                if (!response.ok) {
-                    throw new Error(\`HTTP error! Status: \${response.status} \${response.statusText}\`);
-                }
-                const scriptText = await response.text();
-                callParentFunction('logDebug', \`Worker: OpenCV script fetched successfully (\${scriptText.length} chars). Executing...\`);
-                callParentFunction('updateStatus', "Worker: Executing OpenCV Script...");
-
-                new Function(scriptText)();
-                callParentFunction('logDebug', "Worker: OpenCV script executed. Checking for cv.imread immediately...");
-
-                // --- IMMEDIATE CHECK ---
-                if (typeof self.cv !== 'undefined' && self.cv && typeof self.cv.imread === 'function') {
-                    callParentFunction('logDebug', "Worker: cv.imread found immediately after execution.");
-                    cv = self.cv;
-                    isReady = true;
-                    callParentFunction('logDebug', "OpenCV marked as ready in Worker (immediate check).");
-                    self.postMessage({ type: 'opencv_ready' });
-                } else {
-                    callParentFunction('logWarn', "Worker: cv.imread NOT found immediately after execution. Relying on onRuntimeInitialized callback...");
-                    callParentFunction('updateStatus', "Worker: Waiting for OpenCV WASM initialization...");
-                }
-                // --- END IMMEDIATE CHECK ---
-
-            } catch (error) {
-                callParentFunction('logError', "Worker: Failed to fetch or execute OpenCV script:", error);
-                isReady = false;
-            }
+        // --- Load OpenCV using importScripts ---
+        try {
+            importScripts(OPENCV_URL);
+            callParentFunction('logDebug', "Worker: importScripts call completed for OpenCV. Waiting for onRuntimeInitialized...");
+            callParentFunction('updateStatus', "Worker: Waiting for OpenCV WASM initialization...");
+        } catch (error) {
+            callParentFunction('logError', "Worker: Failed to import OpenCV script via importScripts():", error);
+            isReady = false;
         }
+        // --- End Load OpenCV ---
 
-        // Start the loading process
-        loadAndExecuteOpenCV();
-        // --- End Fetch and Execute ---
-callParentFunction('logError', "Worker: loadAndExecuteOpenCV() has been fired");
 
         // --- Message Handling ---
         self.onmessage = async (event) => {
@@ -441,7 +407,7 @@ callParentFunction('logError', "Worker: loadAndExecuteOpenCV() has been fired");
             }
         }
 
-        callParentFunction('logDebug', "Worker: Event listener set up. Waiting for messages or OpenCV load...");
+        callParentFunction('logDebug', "Worker: Event listener set up. Waiting for messages or OpenCV init.");
 
     `; // End workerScriptContent
 
@@ -989,7 +955,7 @@ callParentFunction('logError', "Worker: loadAndExecuteOpenCV() has been fired");
 
 
     // --- Instantiate the Manager ---
-    logDebug("Instantiating FloorplanManager (Worker/Fetch Version)...");
+    logDebug("Instantiating FloorplanManager (Worker/importScripts Version)...");
     try {
         if (typeof d3 === 'undefined') {
             throw new Error("D3 is not defined.");
@@ -1001,6 +967,6 @@ callParentFunction('logError', "Worker: loadAndExecuteOpenCV() has been fired");
          alert(`Critical Error: ${error.message}. Floorplan Manager cannot start.`);
          // try { showStandaloneLoadingIndicator(`Startup Error: ${error.message}`); } catch(e){} // No indicator element
     }
-    logDebug(`--- Floorplan Manager (Worker/Fetch Strategy, Parent Dev: ${PARENT_DEV_MODE}, Worker Dev: ${WORKER_DEV_MODE}) Execution Finished ---`);
+    logDebug(`--- Floorplan Manager (Worker/importScripts Strategy, Parent Dev: ${PARENT_DEV_MODE}, Worker Dev: ${WORKER_DEV_MODE}) Execution Finished ---`);
 
 })(); // End IIFE
