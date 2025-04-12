@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Floorplan Manager (Iframe OpenCV)
-// @version      1.0.0
+// @version      1.0.1.
 // @description  Uses an iframe to load and run OpenCV, communicating via postMessage.
 // @author       ZLudany
 // @match        https://home.google.com/*
