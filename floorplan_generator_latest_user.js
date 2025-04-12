@@ -316,7 +316,7 @@
         // Start the loading process
         loadAndExecuteOpenCV();
         // --- End Fetch and Execute ---
-
+callParentFunction('logError', "Worker: loadAndExecuteOpenCV() has been fired");
 
         // --- Message Handling ---
         self.onmessage = async (event) => {
