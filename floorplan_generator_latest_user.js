@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Floorplan Manager (Worker OpenCV importScripts + Forced Worker Debug)
-// @version      1.1.7
+// @version      1.1.9
 // @description  Uses Web Worker/importScripts for OpenCV, worker always requests debug logs, formatted.
 // @author       ZLudany
 // @match        https://home.google.com/*
@@ -20,12 +20,14 @@
 
     // --- Parent Logging Helpers (Now with Origin) ---
     function logDebug(message, ...optionalParams /*, origin = 'PARENT' - implicit last arg */ ) {
-        const origin = (optionalParams.length > 0 && ['PARENT', 'WORKER'].includes(optionalParams[optionalParams.length - 1]))
-                       ? optionalParams.pop()
+        const origin = (optionalParams.length > 0 && optionalParams[optionalParams.length - 1].includes('WORKER'))
+                       ? optionalParams[optionalParams.length - 1].pop()
                        : 'PARENT';
-        // Use PARENT_DEV_MODE to decide if PARENT logs use alert
-        const useAlert = (origin === 'PARENT' && PARENT_DEV_MODE);
+        //alert(origin+" :\n "+optionalParams[optionalParams.length - 1]+" :\n "+message);
+        // Use PARENT_DEV_MODE or WORKER_DEV_MODE to decide if PARENT logs use alert
+        const useAlert = (origin === 'PARENT' && PARENT_DEV_MODE) || (origin === 'WORKER' && WORKER_DEV_MODE);
         const prefix = `[${origin} DEBUG]`;
+        //alert(origin+" : "+useAlert);
 
         if (useAlert) {
             let alertMsg = prefix + " " + message;
@@ -46,7 +48,8 @@
         const origin = (optionalParams.length > 0 && ['PARENT', 'WORKER'].includes(optionalParams[optionalParams.length - 1]))
                        ? optionalParams.pop()
                        : 'PARENT';
-        const useAlert = (origin === 'PARENT' && PARENT_DEV_MODE); // Worker warnings handled differently via functionCall
+        // Use PARENT_DEV_MODE or WORKER_DEV_MODE to decide if PARENT logs use alert
+        const useAlert = (origin === 'PARENT' && PARENT_DEV_MODE) || (origin === 'WORKER' && WORKER_DEV_MODE);
         const prefix = `[${origin} WARN]`;
         const fullMessage = prefix + " " + message;
 
@@ -66,10 +69,11 @@
     }
 
     function logError(message, ...optionalParams /*, origin = 'PARENT' */ ) {
-        const origin = (optionalParams.length > 0 && ['PARENT', 'WORKER'].includes(optionalParams[optionalParams.length - 1]))
-                       ? optionalParams.pop()
+        const origin = (optionalParams.length > 0 && optionalParams[optionalParams.length - 1].includes('WORKER'))
+                       ? optionalParams[optionalParams.length - 1].pop()
                        : 'PARENT';
-        const useAlert = (origin === 'PARENT' && PARENT_DEV_MODE); // Worker errors handled differently via functionCall
+        // Use PARENT_DEV_MODE or WORKER_DEV_MODE to decide if PARENT logs use alert
+        const useAlert = (origin === 'PARENT' && PARENT_DEV_MODE) || (origin === 'WORKER' && WORKER_DEV_MODE);
         const prefix = `[${origin} ERROR]`;
         const fullMessage = prefix + " " + message;
 
@@ -240,7 +244,7 @@
         // --- Worker Function Call Helper ---
         function callParentFunction(functionName, ...args) {
             // Worker always requests its preferred log type based on WORKER_DEV_MODE
-            const targetFunctionName = WORKER_DEV_MODE && functionName.startsWith('log') ? 'alert' : functionName;
+            const targetFunctionName = WORKER_DEV_MODE && functionName.startsWith('log') ? functionName : 'alert';
             const finalArgs = WORKER_DEV_MODE && functionName.startsWith('log') ? ["[WORKER " + functionName.toUpperCase() + "] " + args[0]].concat(args.slice(1)) : args;
 
             if (targetFunctionName === 'alert') {
@@ -751,8 +755,9 @@
 
                 this.worker.onmessage = this.handleWorkerMessage.bind(this);
                 this.worker.onerror = (error) => {
-                    logError("Web Worker error:", error.message, error);
-                    this.updateStatus(`Worker Error: ${error.message}. See console.`);
+                    logError("Web Worker error:", error.message, error, 'WORKER');
+                    //alert("[WORKER DEBUG] "+error.message);
+                    this.updateStatus(`Worker Error: ${error.message}. See console.`,'WORKER');
                     this.isWorkerReady = false;
                 };
                 logDebug("Web Worker created and listeners attached.");
@@ -783,7 +788,7 @@
                     this.updateStatus("Ready. Select floorplan image.");
                     break;
                 case 'processing_complete':
-                    logDebug("Parent: Received processing_complete message.");
+                    logDebug("Parent: Received processing_complete message.",["WORKER"]);
                     this.updateStatus("Processing complete. Rendering SVG...");
                     if (message.payload && message.payload.contours) {
                         this.renderContourData(message.payload.contours, message.payload.originalWidth, message.payload.originalHeight)
@@ -811,24 +816,24 @@
                 case 'functionCall':
                     const { functionName, args } = message.payload;
                     if (typeof functionName === 'string' && Array.isArray(args)) {
-                        logDebug(`Parent: Worker requested call: ${functionName}(${args.length} args)`);
+                        logDebug(`Parent: Worker requested call: ${functionName}(${args.length} args)`,["WORKER"]);
                         const targetFunction = this[functionName] || window[functionName];
                         if (typeof targetFunction === 'function') {
                             try {
                                 if (this[functionName]) {
                                      // Call method on this instance
-                                     targetFunction.apply(this, args);
+                                     targetFunction.apply(this, ['WORKER', args]);
                                 } else if (functionName === 'alert') {
                                      // Handle alert specifically - check PARENT mode for actual alert
                                      if (PARENT_DEV_MODE) {
-                                         alert("[WORKER] " + args.join(' '));
+                                         alert("[WORKER::] " + args.join(' '));
                                      } else {
                                          // Log worker's alert request to console if parent alerts are off
                                          console.log("[WORKER ALERT REQUEST]", ...args);
                                      }
                                 } else if (functionName.startsWith('log')) {
                                      // Call global loggers, passing 'WORKER' as origin
-                                     targetFunction(...args, 'WORKER');
+                                     targetFunction(...args, ['WORKER']);
                                 }
                                 // Add other safe global functions if needed
                             } catch (e) {
@@ -841,12 +846,12 @@
                         logWarn("Parent received invalid functionCall message format from worker.");
                     }
                     break;
-                default:
+                  default:
                     logWarn("Parent: Received unknown message type from worker:", message.type);
             }
         }
 
-        updateStatus(message) {
+        updateStatus(...message) {
             if (this.uiCreated && this.statusLabel) {
                  if (this.container && this.container.style.display !== 'flex' && this.isWorkerReady) {
                       this.container.style.display = 'flex';
@@ -855,7 +860,7 @@
             } else {
                  logDebug("Manager Status (UI not ready):", message);
             }
-            logDebug("Manager Status Update:", message);
+            PARENT_DEV_MODE?logDebug("Manager Status Update:", message):function(){};
         }
 
         handleFileChange(e) {
