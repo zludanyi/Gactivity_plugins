@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Floorplan Manager (Worker OpenCV importScripts + Dev Mode - Formatted v4)
-// @version      1.1.5
-// @description  Uses Web Worker/importScripts for OpenCV, separate dev modes, standard style injection, formatted.
+// @name         Floorplan Manager (Worker OpenCV importScripts + Forced Worker Debug)
+// @version      1.1.7
+// @description  Uses Web Worker/importScripts for OpenCV, worker always requests debug logs, formatted.
 // @author       ZLudany
 // @match        https://home.google.com/*
 // @grant        none
@@ -14,14 +14,20 @@
     'use strict';
 
     // --- Configuration ---
-    const PARENT_DEV_MODE = false; // <<< SET TO true FOR ALERT LOGGING, false FOR CONSOLE LOGGING >>>
-    const WORKER_DEV_MODE = false; // <<< Log level for the Web Worker script (true=alert, false=console) >>>
+    const PARENT_DEV_MODE = false; // Log level for the main userscript (true=alert, false=console)
+    const WORKER_DEV_MODE = true; // <<< FORCED: Worker always requests debug logs (true=alert request, false=console request) >>>
     // --- End Configuration ---
 
-    // --- Parent Logging Helpers ---
-    function logDebug(message, ...optionalParams) {
-        const prefix = "[PARENT DEBUG]";
-        if (PARENT_DEV_MODE) {
+    // --- Parent Logging Helpers (Now with Origin) ---
+    function logDebug(message, ...optionalParams /*, origin = 'PARENT' - implicit last arg */ ) {
+        const origin = (optionalParams.length > 0 && ['PARENT', 'WORKER'].includes(optionalParams[optionalParams.length - 1]))
+                       ? optionalParams.pop()
+                       : 'PARENT';
+        // Use PARENT_DEV_MODE to decide if PARENT logs use alert
+        const useAlert = (origin === 'PARENT' && PARENT_DEV_MODE);
+        const prefix = `[${origin} DEBUG]`;
+
+        if (useAlert) {
             let alertMsg = prefix + " " + message;
             if (optionalParams.length > 0) {
                 try {
@@ -36,10 +42,15 @@
         }
     }
 
-    function logWarn(message, ...optionalParams) {
-        const prefix = "[PARENT WARN]";
+    function logWarn(message, ...optionalParams /*, origin = 'PARENT' */ ) {
+        const origin = (optionalParams.length > 0 && ['PARENT', 'WORKER'].includes(optionalParams[optionalParams.length - 1]))
+                       ? optionalParams.pop()
+                       : 'PARENT';
+        const useAlert = (origin === 'PARENT' && PARENT_DEV_MODE); // Worker warnings handled differently via functionCall
+        const prefix = `[${origin} WARN]`;
         const fullMessage = prefix + " " + message;
-        if (PARENT_DEV_MODE) {
+
+        if (useAlert) {
             let alertMsg = fullMessage;
             if (optionalParams.length > 0) {
                 try {
@@ -54,10 +65,15 @@
         }
     }
 
-    function logError(message, ...optionalParams) {
-        const prefix = "[PARENT ERROR]";
+    function logError(message, ...optionalParams /*, origin = 'PARENT' */ ) {
+        const origin = (optionalParams.length > 0 && ['PARENT', 'WORKER'].includes(optionalParams[optionalParams.length - 1]))
+                       ? optionalParams.pop()
+                       : 'PARENT';
+        const useAlert = (origin === 'PARENT' && PARENT_DEV_MODE); // Worker errors handled differently via functionCall
+        const prefix = `[${origin} ERROR]`;
         const fullMessage = prefix + " " + message;
-        if (PARENT_DEV_MODE) {
+
+        if (useAlert) {
             let alertMsg = fullMessage;
             if (optionalParams.length > 0) {
                 try {
@@ -73,7 +89,7 @@
     }
     // --- End Parent Logging Helpers ---
 
-    logDebug(`--- Floorplan Manager (Worker/importScripts Strategy, Parent Dev: ${PARENT_DEV_MODE}, Worker Dev: ${WORKER_DEV_MODE}) Execution Starting ---`);
+    logDebug(`--- Floorplan Manager (Worker/importScripts, Forced Worker Debug) Execution Starting ---`);
 
     // --- Constants ---
     const OPENCV_URL = 'https://docs.opencv.org/4.5.4/opencv.js';
@@ -217,24 +233,27 @@
     // --- Worker Script Content ---
     const workerScriptContent = `
         // --- Worker Configuration ---
-        const WORKER_DEV_MODE = ${WORKER_DEV_MODE};
+        const WORKER_DEV_MODE = ${WORKER_DEV_MODE}; // Injected from parent
         const OPENCV_URL = '${OPENCV_URL}';
         // --- End Worker Configuration ---
 
         // --- Worker Function Call Helper ---
         function callParentFunction(functionName, ...args) {
+            // Worker always requests its preferred log type based on WORKER_DEV_MODE
             const targetFunctionName = WORKER_DEV_MODE && functionName.startsWith('log') ? 'alert' : functionName;
             const finalArgs = WORKER_DEV_MODE && functionName.startsWith('log') ? ["[WORKER " + functionName.toUpperCase() + "] " + args[0]].concat(args.slice(1)) : args;
+
             if (targetFunctionName === 'alert') {
-                 let alertMsg = args.join(' ');
+                 let alertMsg = args.join(' '); // Simple join for alert
                  self.postMessage({
                      type: "functionCall",
                      payload: {
-                         functionName: 'alert',
+                         functionName: 'alert', // Request alert specifically
                          args: [alertMsg]
                      }
                  });
             } else {
+                 // Request standard function call (logDebug, logWarn, logError, updateStatus etc.)
                  self.postMessage({
                      type: "functionCall",
                      payload: {
@@ -278,7 +297,8 @@
             callParentFunction('logDebug', "Worker: importScripts call completed for OpenCV. Waiting for onRuntimeInitialized...");
             callParentFunction('updateStatus', "Worker: Waiting for OpenCV WASM initialization...");
         } catch (error) {
-            callParentFunction('logError', "Worker: Failed to import OpenCV script via importScripts():", error);
+            callParentFunction('logError', "Worker: importScripts FAILED for OpenCV:", error.message, error.stack);
+            callParentFunction('updateStatus', "Worker: Failed to load OpenCV (Security Policy or Network Error).");
             isReady = false;
         }
         // --- End Load OpenCV ---
@@ -796,12 +816,21 @@
                         if (typeof targetFunction === 'function') {
                             try {
                                 if (this[functionName]) {
+                                     // Call method on this instance
                                      targetFunction.apply(this, args);
-                                } else if (functionName === 'alert' && (PARENT_DEV_MODE || WORKER_DEV_MODE)) {
-                                     alert(args.join(' '));
+                                } else if (functionName === 'alert') {
+                                     // Handle alert specifically - check PARENT mode for actual alert
+                                     if (PARENT_DEV_MODE) {
+                                         alert("[WORKER] " + args.join(' '));
+                                     } else {
+                                         // Log worker's alert request to console if parent alerts are off
+                                         console.log("[WORKER ALERT REQUEST]", ...args);
+                                     }
                                 } else if (functionName.startsWith('log')) {
-                                     targetFunction(...args);
+                                     // Call global loggers, passing 'WORKER' as origin
+                                     targetFunction(...args, 'WORKER');
                                 }
+                                // Add other safe global functions if needed
                             } catch (e) {
                                 logError(`Parent: Error executing requested worker function '${functionName}':`, e);
                             }
