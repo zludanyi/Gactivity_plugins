@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Floorplan Manager (Iframe OpenCV + Separate Dev Modes - Formatted)
-// @version      1.0.5
-// @description  Uses iframe for OpenCV, separate dev mode toggles for logging, standard style/script injection, formatted.
+// @name         Floorplan Manager (Worker OpenCV + Dev Mode - Formatted v2)
+// @version      1.1.1
+// @description  Uses Web Worker for OpenCV, separate dev modes, standard style injection, formatted.
 // @author       ZLudany
 // @match        https://home.google.com/*
 // @grant        none
@@ -15,13 +15,14 @@
 
     // --- Configuration ---
     const PARENT_DEV_MODE = false; // <<< SET TO true FOR ALERT LOGGING, false FOR CONSOLE LOGGING >>>
-    const IFRAME_DEV_MODE = false; // <<< Log level for the iframe script (true=alert, false=console) >>>
+    const WORKER_DEV_MODE = false; // <<< Log level for the Web Worker script (true=alert, false=console) >>>
     // --- End Configuration ---
 
-    // --- Logging Helpers ---
+    // --- Parent Logging Helpers ---
     function logDebug(message, ...optionalParams) {
+        const prefix = "[PARENT DEBUG]";
         if (PARENT_DEV_MODE) {
-            let alertMsg = "[PARENT DEBUG] " + message;
+            let alertMsg = prefix + " " + message;
             if (optionalParams.length > 0) {
                 try {
                     alertMsg += " :: " + optionalParams.map(p => JSON.stringify(p)).join('; ');
@@ -31,12 +32,13 @@
             }
             alert(alertMsg);
         } else {
-            console.log("[PARENT DEBUG]", message, ...optionalParams);
+            console.log(prefix, message, ...optionalParams);
         }
     }
 
     function logWarn(message, ...optionalParams) {
-        const fullMessage = "[PARENT WARN] " + message;
+        const prefix = "[PARENT WARN]";
+        const fullMessage = prefix + " " + message;
         if (PARENT_DEV_MODE) {
             let alertMsg = fullMessage;
             if (optionalParams.length > 0) {
@@ -53,7 +55,8 @@
     }
 
     function logError(message, ...optionalParams) {
-        const fullMessage = "[PARENT ERROR] " + message;
+        const prefix = "[PARENT ERROR]";
+        const fullMessage = prefix + " " + message;
         if (PARENT_DEV_MODE) {
             let alertMsg = fullMessage;
             if (optionalParams.length > 0) {
@@ -68,12 +71,11 @@
             console.error(fullMessage, ...optionalParams);
         }
     }
-    // --- End Logging Helpers ---
+    // --- End Parent Logging Helpers ---
 
-    logDebug(`--- Floorplan Manager (Iframe Strategy, Parent Dev: ${PARENT_DEV_MODE}, Iframe Dev: ${IFRAME_DEV_MODE}) Execution Starting ---`);
+    logDebug(`--- Floorplan Manager (Worker Strategy, Parent Dev: ${PARENT_DEV_MODE}, Worker Dev: ${WORKER_DEV_MODE}) Execution Starting ---`);
 
     // --- Constants ---
-    const IFRAME_ID = 'opencv-processor-iframe';
     const OPENCV_URL = 'https://docs.opencv.org/4.5.4/opencv.js';
 
     // --- Helper Function to Add Styles ---
@@ -86,7 +88,7 @@
             }
             const style = document.createElement('style');
             style.type = 'text/css';
-            style.id = 'floorplan-manager-styles'; // Optional ID
+            style.id = 'floorplan-manager-styles';
             style.appendChild(document.createTextNode(css));
             head.appendChild(style);
             logDebug("Global styles added to <head>.");
@@ -106,7 +108,7 @@
             height: 100vh;
             background: rgba(0, 0, 0, 0.85);
             z-index: 2147483647 !important;
-            display: none;
+            display: none; /* Initially hidden, shown by manager */
             flex-direction: column;
             align-items: center;
             justify-content: center;
@@ -116,20 +118,7 @@
             color: white;
             overflow: hidden;
         }
-        #floorplan-loading-indicator {
-            position: fixed;
-            top: 10px;
-            left: 10px;
-            background: rgba(0,0,0,0.8);
-            color: white;
-            padding: 10px 15px;
-            border-radius: 5px;
-            z-index: 2147483647 !important;
-            font-family: sans-serif;
-            text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
-            background: linear-gradient(to right, #3498db, #2980b9);
-            display: none;
-        }
+        /* No loading indicator style needed - using logs */
         #floorplan-controls {
             background: #333;
             padding: 15px;
@@ -141,7 +130,7 @@
             flex-shrink: 0;
             z-index: 1;
         }
-        #floorplan-canvas {
+        #floorplan-canvas { /* For parent preview */
             background: #444;
             border: 1px solid #777;
             max-width: 90%;
@@ -173,7 +162,7 @@
             border-radius: 3px;
             z-index: 2;
         }
-        #floorplan-status {
+        #floorplan-status { /* Status label in the main UI */
             margin-top: auto;
             font-style: italic;
             background: #333;
@@ -225,366 +214,216 @@
     addGlobalStyle(cssStyles);
 
 
-    // --- Iframe Content (HTML + JS) ---
-    const iframeContent = `
-<!DOCTYPE html>
-<html>
-<head>
-    <title>OpenCV Processor</title>
-    <meta charset="UTF-8">
-    <style>
-        body {
-            margin: 0;
-            padding: 0;
-            background-color: #111;
-            color: #eee;
-            font-family: sans-serif;
-            font-size: 10px;
-        }
-        #iframe-status {
-            padding: 5px;
-            background-color: #333;
-        }
-        #processing-canvas {
-            display: none;
-        }
-    </style>
-</head>
-<body>
-    <div id="iframe-status">Iframe Processor: Initializing...</div>
-    <canvas id="processing-canvas"></canvas>
-
-    <script>
-        // --- Injected Config & Helpers ---
-        const DEV_MODE = ${IFRAME_DEV_MODE};
+    // --- Worker Script Content ---
+    const workerScriptContent = `
+        // --- Worker Configuration ---
+        const WORKER_DEV_MODE = ${WORKER_DEV_MODE};
         const OPENCV_URL = '${OPENCV_URL}';
-        const PARENT_ORIGIN = '${window.location.origin}';
+        // --- End Worker Configuration ---
 
-        // Iframe Logging helpers
+        // --- Worker Logging Helpers ---
         function logDebug(message, ...optionalParams) {
-            if (DEV_MODE) {
-                let alertMsg = "[IFRAME DEBUG] " + message;
-                if (optionalParams.length > 0) { try { alertMsg += " :: " + optionalParams.map(p => JSON.stringify(p)).join('; '); } catch (e) { alertMsg += " :: [Error stringifying params]"; } }
-                alert(alertMsg);
+            const prefix = "[WORKER DEBUG]";
+            if (WORKER_DEV_MODE) {
+                console.log(prefix, message, ...optionalParams);
+                // Example of posting for alert:
+                // self.postMessage({ type: 'log_alert', payload: { level: 'debug', message: prefix + " " + message } });
             } else {
-                console.log("[IFRAME DEBUG]", message, ...optionalParams);
+                console.log(prefix, message, ...optionalParams);
             }
         }
         function logWarn(message, ...optionalParams) {
-            const fullMessage = "[IFRAME WARN] " + message;
-            if (DEV_MODE) {
-                let alertMsg = fullMessage;
-                if (optionalParams.length > 0) { try { alertMsg += " :: " + optionalParams.map(p => JSON.stringify(p)).join('; '); } catch (e) { alertMsg += " :: [Error stringifying params]"; } }
-                alert(alertMsg);
+            const prefix = "[WORKER WARN]";
+            const fullMessage = prefix + " " + message;
+            if (WORKER_DEV_MODE) {
+                console.warn(fullMessage, ...optionalParams); /* Post alert if needed */
             } else {
                 console.warn(fullMessage, ...optionalParams);
             }
         }
         function logError(message, ...optionalParams) {
-            const fullMessage = "[IFRAME ERROR] " + message;
-            if (DEV_MODE) {
-                let alertMsg = fullMessage;
-                if (optionalParams.length > 0) { try { alertMsg += " :: " + optionalParams.map(p => JSON.stringify(p)).join('; '); } catch (e) { alertMsg += " :: [Error stringifying params]"; } }
-                alert(alertMsg);
+            const prefix = "[WORKER ERROR]";
+            const fullMessage = prefix + " " + message;
+            if (WORKER_DEV_MODE) {
+                console.error(fullMessage, ...optionalParams); /* Post alert if needed */
             } else {
                 console.error(fullMessage, ...optionalParams);
             }
+            self.postMessage({ type: 'processing_error', payload: { message: message + (optionalParams.length ? ' Details in worker console.' : '') } });
         }
-        // --- End Injected Config & Helpers ---
+        // --- End Worker Logging Helpers ---
 
-        logDebug("Iframe script started.");
+        logDebug("Worker script started.");
 
-        function updateIframeStatus(message) {
-            const statusEl = document.getElementById('iframe-status');
-            if (statusEl) {
-                statusEl.textContent = "Iframe: " + message;
+        let cv = null;
+        let isReady = false;
+
+        // Define Module for OpenCV initialization
+        self.Module = {
+            onRuntimeInitialized: () => {
+                logDebug("OpenCV Runtime Initialized in Worker.");
+                if (typeof self.cv !== 'undefined' && self.cv.imread) {
+                    cv = self.cv;
+                    isReady = true;
+                    logDebug("OpenCV is ready in Worker.");
+                    self.postMessage({ type: 'opencv_ready' });
+                } else {
+                    logError("Worker: onRuntimeInitialized called, but cv or cv.imread is invalid!");
+                }
+            },
+            onAbort: (reason) => {
+                 logError("Worker OpenCV WASM Aborted:", reason);
+                 isReady = false;
             }
-            logDebug("Iframe Status Update: " + message);
-        }
+        };
+        logDebug("Worker: Module defined. Importing OpenCV script...");
 
-        // Standard script loader within iframe
-        function loadScript(url) {
-            updateIframeStatus("Loading OpenCV script tag: " + url);
-            return new Promise((resolve, reject) => {
-                const script = document.createElement('script');
-                script.src = url;
-                script.async = true;
-                script.onload = () => {
-                    updateIframeStatus("OpenCV script tag loaded.");
-                    resolve();
-                };
-                script.onerror = (err) => {
-                    const errorMsg = "Error loading OpenCV script tag.";
-                    updateIframeStatus(errorMsg);
-                    logError("Iframe script load error:", err);
-                    reject(new Error(\`Failed to load script: \${url}\`));
-                };
-                document.head.appendChild(script);
-            });
-        }
-
-        // --- Core OpenCV Processing Logic (within iframe) ---
-        class OpenCVProcessor {
-            cv = null;
+        try {
+            importScripts(OPENCV_URL);
+            logDebug("Worker: importScripts called for OpenCV.");
+        } catch (error) {
+            logError("Worker: Failed to import OpenCV script:", error);
             isReady = false;
-            processingCanvas = null;
-            processingCtx = null;
+        }
 
-            constructor() {
-                updateIframeStatus("OpenCVProcessor constructor called.");
-                this.processingCanvas = document.getElementById('processing-canvas');
-                if (this.processingCanvas) {
-                    this.processingCtx = this.processingCanvas.getContext('2d');
-                } else {
-                     logError("Iframe: Processing canvas not found!");
-                     this.sendMessageToParent('processing_error', { message: "Iframe internal error: Canvas missing." });
+        // --- Message Handling ---
+        self.onmessage = async (event) => {
+            logDebug("Worker received message:", event.data);
+            const message = event.data;
+
+            if (!message || !message.type) {
+                logWarn("Worker: Received message with no type.");
+                return;
+            }
+
+            if (message.type === 'process_image_blob') {
+                if (!isReady || !cv) {
+                    logError("Worker: Received image blob but OpenCV is not ready.");
+                    return;
                 }
-
-                window.Module = {
-                    onRuntimeInitialized: this.onCvReady.bind(this),
-                    onAbort: (reason) => {
-                         const errorMsg = "Fatal Error: OpenCV WASM Aborted: " + reason;
-                         logError("Iframe OpenCV WASM Aborted:", reason);
-                         updateIframeStatus(errorMsg);
-                         this.sendMessageToParent('processing_error', { message: "OpenCV WASM Aborted: " + reason });
-                         this.isReady = false;
-                    }
-                };
-                updateIframeStatus("Module defined. Attempting to load OpenCV script...");
-                loadScript(OPENCV_URL).catch(error => {
-                    this.sendMessageToParent('processing_error', { message: "Failed to load OpenCV script in iframe: " + error.message });
-                });
-            }
-
-            onCvReady() {
-                updateIframeStatus("OpenCV Runtime Initialized.");
-                if (typeof cv !== 'undefined' && cv.imread) {
-                    this.cv = cv;
-                    this.isReady = true;
-                    updateIframeStatus("OpenCV is ready.");
-                    this.sendMessageToParent('opencv_ready');
-                } else {
-                    logError("Iframe: onRuntimeInitialized called, but cv or cv.imread is invalid!");
-                    updateIframeStatus("Error: OpenCV loaded but invalid.");
-                    this.sendMessageToParent('processing_error', { message: "OpenCV loaded in iframe but was invalid." });
-                }
-            }
-
-            sendMessageToParent(type, data = {}) {
-                console.log(\`Iframe: Sending message to parent: \${type}\`, data); // Keep console for sent messages
-                window.parent.postMessage({ type: type, payload: data }, PARENT_ORIGIN);
-            }
-
-            async processImageBlob(imageBlob) {
-                updateIframeStatus("Received image blob for processing.");
-                if (!this.isReady || !this.cv || !this.processingCanvas || !this.processingCtx) {
-                    logError("Iframe: Not ready or missing components for processing.");
-                    this.sendMessageToParent('processing_error', { message: "Iframe processor not ready or canvas missing." });
+                if (!(message.payload && message.payload.imageBlob instanceof Blob)) {
+                    logError("Worker: Invalid image blob received.");
                     return;
                 }
 
-                let src = null;
-                let gray = null;
-                let edges = null;
-                let contours = null;
-                let hierarchy = null;
-                const formattedContours = [];
-                let blobUrl = null;
+                await processImageBlob(message.payload.imageBlob);
 
-                try {
-                    blobUrl = URL.createObjectURL(imageBlob);
-                    updateIframeStatus("Created Blob URL, loading image...");
-
-                    const imgElement = await this.loadImageFromUrl(blobUrl);
-                    updateIframeStatus("Image loaded into element.");
-
-                    this.processingCanvas.width = imgElement.naturalWidth;
-                    this.processingCanvas.height = imgElement.naturalHeight;
-                    this.processingCtx.drawImage(imgElement, 0, 0);
-                    updateIframeStatus("Image drawn to processing canvas.");
-
-                    const cv = this.cv;
-                    src = cv.imread(this.processingCanvas);
-                    if (src.empty()) {
-                        throw new Error("cv.imread failed from canvas.");
-                    }
-
-                    gray = new cv.Mat();
-                    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-                    cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
-                    edges = new cv.Mat();
-                    cv.Canny(gray, edges, 50, 100);
-                    contours = new cv.MatVector();
-                    hierarchy = new cv.Mat();
-                    cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-                    updateIframeStatus(\`Found \${contours.size()} raw contours.\`);
-
-                    const minArea = 50;
-
-                    for (let i = 0; i < contours.size(); ++i) {
-                        const contour = contours.get(i);
-                        try {
-                             const area = cv.contourArea(contour);
-                             if (area < minArea || contour.rows < 3) {
-                                 continue;
-                             }
-
-                             const pointsArray = [];
-                             const pointData = contour.data32S;
-                             for (let j = 0; j < contour.rows; ++j) {
-                                 pointsArray.push({ x: pointData[j * 2], y: pointData[j * 2 + 1] });
-                             }
-                             formattedContours.push({ id: \`iframe-contour-\${Date.now()}-\${i}\`, points: pointsArray });
-                        } finally {
-                             if(contour) {
-                                 contour.delete();
-                             }
-                        }
-                    }
-                    updateIframeStatus(\`Processed \${formattedContours.length} valid contours.\`);
-                    this.sendMessageToParent('processing_complete', {
-                        contours: formattedContours,
-                        originalWidth: imgElement.naturalWidth,
-                        originalHeight: imgElement.naturalHeight
-                    });
-
-                } catch (error) {
-                    logError("Iframe processing error:", error);
-                    updateIframeStatus("Error during processing: " + error.message);
-                    this.sendMessageToParent('processing_error', { message: "Error in iframe processing: " + error.message });
-                } finally {
-                    if (src) {
-                        src.delete();
-                    }
-                    if (gray) {
-                        gray.delete();
-                    }
-                    if (edges) {
-                        edges.delete();
-                    }
-                    if (contours) {
-                        contours.delete();
-                    }
-                    if (hierarchy) {
-                        hierarchy.delete();
-                    }
-                    if (blobUrl) {
-                        URL.revokeObjectURL(blobUrl);
-                    }
-                    console.log("Iframe: OpenCV Mats and Blob URL cleaned up."); // Keep console log
-                }
-            }
-
-            loadImageFromUrl(url) {
-                return new Promise((resolve, reject) => {
-                    const img = new Image();
-                    img.onload = () => {
-                        resolve(img);
-                    };
-                    img.onerror = (err) => {
-                         const errorMsg = "Failed to load image from Blob URL in iframe.";
-                         logError(errorMsg, err);
-                         reject(new Error(errorMsg));
-                    };
-                    img.src = url;
-                });
-            }
-        } // End OpenCVProcessor Class
-
-        let processorInstance = null;
-
-        window.addEventListener('message', (event) => {
-             if (event.origin !== PARENT_ORIGIN) {
-                 return;
-             }
-             console.log("Iframe received message:", event.data); // Keep console log
-             const message = event.data;
-            if (message && message.type === 'process_image_blob' && message.payload && message.payload.imageBlob instanceof Blob) {
-                if (processorInstance && processorInstance.isReady) {
-                    processorInstance.processImageBlob(message.payload.imageBlob);
-                } else {
-                    const errorMsg = "Iframe processor not ready to handle image.";
-                    logError(errorMsg);
-                    window.parent.postMessage({ type: 'processing_error', payload: { message: errorMsg } }, PARENT_ORIGIN);
-                }
             } else {
-                // logWarn("Iframe: Received unknown message format:", message);
+                logWarn("Worker: Received unknown message type:", message.type);
             }
-        });
+        };
 
-        try {
-            processorInstance = new OpenCVProcessor();
-        } catch (error) {
-             logError("Iframe: Failed to instantiate OpenCVProcessor:", error);
-             window.parent.postMessage({ type: 'processing_error', payload: { message: "Iframe failed to initialize processor: " + error.message } }, PARENT_ORIGIN);
-             updateIframeStatus("Fatal Error: Failed to initialize processor: " + error.message);
+        // --- Image Processing Function ---
+        async function processImageBlob(imageBlob) {
+            logDebug("Worker: Starting image blob processing.");
+            self.postMessage({ type: 'status_update', payload: { message: "Worker: Processing image..." } });
+
+            let src = null;
+            let gray = null;
+            let edges = null;
+            let contours = null;
+            let hierarchy = null;
+            const formattedContours = [];
+            let imageBitmap = null;
+            let offscreenCanvas = null;
+            let ctx = null;
+
+            try {
+                imageBitmap = await createImageBitmap(imageBlob);
+                logDebug(\`Worker: Created ImageBitmap \${imageBitmap.width}x\${imageBitmap.height}\`);
+
+                offscreenCanvas = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
+                ctx = offscreenCanvas.getContext('2d');
+                if (!ctx) {
+                    throw new Error("Could not get OffscreenCanvas 2D context.");
+                }
+                ctx.drawImage(imageBitmap, 0, 0);
+                logDebug("Worker: Image drawn to OffscreenCanvas.");
+                imageBitmap.close();
+
+                src = cv.imread(offscreenCanvas);
+                if (src.empty()) {
+                    throw new Error("cv.imread failed from OffscreenCanvas.");
+                }
+
+                gray = new cv.Mat();
+                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+                cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+                edges = new cv.Mat();
+                cv.Canny(gray, edges, 50, 100);
+                contours = new cv.MatVector();
+                hierarchy = new cv.Mat();
+                cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+                logDebug(\`Worker: Found \${contours.size()} raw contours.\`);
+
+                const minArea = 50;
+
+                for (let i = 0; i < contours.size(); ++i) {
+                    const contour = contours.get(i);
+                    try {
+                         const area = cv.contourArea(contour);
+                         if (area < minArea || contour.rows < 3) {
+                             continue;
+                         }
+                         const pointsArray = [];
+                         const pointData = contour.data32S;
+                         for (let j = 0; j < contour.rows; ++j) {
+                             pointsArray.push({ x: pointData[j * 2], y: pointData[j * 2 + 1] });
+                         }
+                         formattedContours.push({ id: \`worker-contour-\${Date.now()}-\${i}\`, points: pointsArray });
+                    } finally {
+                         if(contour) {
+                             contour.delete();
+                         }
+                    }
+                }
+                logDebug(\`Worker: Processed \${formattedContours.length} valid contours.\`);
+
+                self.postMessage({
+                    type: 'processing_complete',
+                    payload: {
+                        contours: formattedContours,
+                        originalWidth: offscreenCanvas.width,
+                        originalHeight: offscreenCanvas.height
+                    }
+                });
+
+            } catch (error) {
+                logError("Worker processing error:", error);
+            } finally {
+                if (src) {
+                    src.delete();
+                }
+                if (gray) {
+                    gray.delete();
+                }
+                if (edges) {
+                    edges.delete();
+                }
+                if (contours) {
+                    contours.delete();
+                }
+                if (hierarchy) {
+                    hierarchy.delete();
+                }
+                if (imageBitmap && !imageBitmap.closed) {
+                    imageBitmap.close();
+                }
+                logDebug("Worker: OpenCV Mats cleaned up.");
+            }
         }
 
-    </script>
-</body>
-</html>
-`; // End iframeContent
+        logDebug("Worker: Event listener set up. Waiting for messages or OpenCV init.");
+        self.postMessage({ type: 'status_update', payload: { message: "Worker: Initialized and waiting." } });
+
+    `; // End workerScriptContent
 
 
     // --- Standalone Loading Indicator Helpers ---
-    function showStandaloneLoadingIndicator(message) {
-         logDebug("Attempting to show standalone indicator:", message);
-         let indicator = null;
-         try {
-             indicator = document.getElementById('floorplan-loading-indicator');
-             if (!indicator) {
-                 indicator = document.createElement('div');
-                 indicator.id = 'floorplan-loading-indicator';
-                 const rootEl = document.documentElement || document.body;
-                 if (rootEl) {
-                     rootEl.appendChild(indicator);
-                     logDebug("Standalone loading indicator created and appended.");
-                 } else {
-                     logError("Cannot append indicator: No documentElement or body found!");
-                     return null;
-                 }
-             } else {
-                 logDebug("Reusing existing standalone indicator.");
-             }
-             indicator.textContent = message;
-             indicator.style.display = 'block';
-             logDebug("Standalone loading indicator shown.");
-         } catch (e) {
-             logError("Error in showStandaloneLoadingIndicator:", e);
-             indicator = null;
-         }
-         return indicator;
-     }
-     function updateStandaloneLoadingIndicator(indicator, message) {
-         logDebug("Attempting to update standalone indicator:", message);
-         try {
-             const targetIndicator = indicator || document.getElementById('floorplan-loading-indicator');
-             if (targetIndicator) {
-                 targetIndicator.textContent = message;
-                 targetIndicator.style.display = 'block';
-                 logDebug("Standalone loading indicator updated.");
-             } else {
-                 logWarn("updateStandaloneLoadingIndicator: Indicator not found.");
-                 showStandaloneLoadingIndicator("[Update Fallback] " + message);
-             }
-         } catch (e) {
-             logError("Error in updateStandaloneLoadingIndicator:", e);
-         }
-     }
-     function hideStandaloneLoadingIndicator(indicator) {
-         logDebug("Attempting to hide standalone indicator.");
-         try {
-             const targetIndicator = indicator || document.getElementById('floorplan-loading-indicator');
-             if (targetIndicator) {
-                 targetIndicator.style.display = 'none';
-                 logDebug("Standalone loading indicator hidden.");
-             } else {
-                 logWarn("hideStandaloneLoadingIndicator: Indicator not found.");
-             }
-         } catch (e) {
-             logError("Error in hideStandaloneLoadingIndicator:", e);
-         }
-     }
+    // (Not used in this version as logging replaces visual indicators)
+    // function showStandaloneLoadingIndicator(message) { /* ... */ }
+    // function updateStandaloneLoadingIndicator(indicator, message) { /* ... */ }
+    // function hideStandaloneLoadingIndicator(indicator) { /* ... */ }
     // --- End Standalone Helpers ---
 
 
@@ -779,9 +618,8 @@
     // --- Floorplan Manager Class (Parent Scope) ---
     logDebug("Defining FloorplanManager class...");
     class FloorplanManager extends FloorplanCreator {
-        iframe = null;
-        isIframeReady = false;
-        currentBlobUrl = null;
+        worker = null;
+        isWorkerReady = false;
         uiCreated = false;
         container = null;
         controlsDiv = null;
@@ -791,15 +629,12 @@
         canvasCtx = null;
         canvasLabel = null;
         closeButton = null;
-        loadingIndicator = null;
+        // No loadingIndicator element ref needed
 
         constructor() {
             logDebug("FloorplanManager constructor started.");
             if (typeof d3 === 'undefined' || !d3) {
                 logError("FATAL: D3 library failed!");
-                try {
-                    showStandaloneLoadingIndicator("Error: D3 Library Failed!");
-                } catch(e){}
                 throw new Error("D3 library failed to load.");
             }
             logDebug("FloorplanManager: D3 found.");
@@ -824,7 +659,7 @@
                 }
                 this.container = null;
                 this.uiCreated = false;
-                this.showLoadingIndicator(`Error Creating UI: ${e.message}`);
+                this.updateStatus(`Error Creating UI: ${e.message}`); // Use updateStatus which logs
                 throw new Error(`Failed to populate UI: ${e.message}`);
             }
             try {
@@ -845,12 +680,12 @@
                 }
                 this.container = null;
                 this.uiCreated = false;
-                this.showLoadingIndicator(`Error Displaying UI: ${e.message}`);
+                this.updateStatus(`Error Displaying UI: ${e.message}`); // Use updateStatus
                 throw new Error(`Failed to append UI: ${e.message}`);
             }
-            this.showLoadingIndicator("Initializing OpenCV Processor (Iframe)...");
-            this.setupIframe();
-            this.setupMessageListener();
+
+            this.updateStatus("Initializing OpenCV Processor (Worker)...");
+            this.setupWorker();
             logDebug("FloorplanManager constructor finished successfully.");
         }
 
@@ -902,165 +737,129 @@
             logDebug("Manager: UI elements populated in container.");
         }
 
-        showLoadingIndicator(message = "Loading...") {
-            if (!this.loadingIndicator) {
-                this.loadingIndicator = document.getElementById('floorplan-loading-indicator');
-                if (!this.loadingIndicator) {
-                    this.loadingIndicator = document.createElement('div');
-                    this.loadingIndicator.id = 'floorplan-loading-indicator';
-                    const rootEl = document.documentElement || document.body;
-                    if(rootEl) {
-                        rootEl.appendChild(this.loadingIndicator);
+        setupWorker() {
+            logDebug("Setting up Web Worker...");
+            try {
+                const blob = new Blob([workerScriptContent], { type: 'application/javascript' });
+                const workerUrl = URL.createObjectURL(blob);
+                this.worker = new Worker(workerUrl);
+                URL.revokeObjectURL(workerUrl);
+
+                this.worker.onmessage = this.handleWorkerMessage.bind(this);
+                this.worker.onerror = (error) => {
+                    logError("Web Worker error:", error.message, error);
+                    this.updateStatus(`Worker Error: ${error.message}. See console.`);
+                    this.isWorkerReady = false;
+                };
+                logDebug("Web Worker created and listeners attached.");
+
+            } catch (error) {
+                logError("Failed to create Web Worker:", error);
+                this.updateStatus("Error: Could not initialize background processor.");
+                this.isWorkerReady = false;
+            }
+        }
+
+        handleWorkerMessage(event) {
+            logDebug("Parent received message from worker:", event.data);
+            const message = event.data;
+            if (!message || !message.type) {
+                return;
+            }
+
+            switch (message.type) {
+                case 'opencv_ready':
+                    logDebug("Parent: Worker reported OpenCV is ready.");
+                    this.isWorkerReady = true;
+                    if (this.container) {
+                        this.container.style.display = 'flex'; // Show main UI
+                    } else {
+                        logError("Cannot show container, reference missing after worker ready!");
                     }
-                    logDebug("Manager's loading indicator created.");
-                }
+                    this.updateStatus("Ready. Select floorplan image.");
+                    break;
+                case 'processing_complete':
+                    logDebug("Parent: Received processing_complete message.");
+                    this.updateStatus("Processing complete. Rendering SVG...");
+                    if (message.payload && message.payload.contours) {
+                        this.renderContourData(message.payload.contours, message.payload.originalWidth, message.payload.originalHeight)
+                            .then(() => {
+                                 this.updateStatus(`SVG rendered with ${message.payload.contours.length} shapes.`);
+                                 this.hideCanvas();
+                            })
+                            .catch(error => {
+                                 logError("Parent: Error rendering SVG:", error);
+                                 this.updateStatus(`Error rendering SVG: ${error.message}`);
+                                 this.showCanvas();
+                            });
+                    } else {
+                         logWarn("Parent: processing_complete message missing contour data.");
+                         this.updateStatus("Processing finished, but no contour data received.");
+                         this.showCanvas();
+                    }
+                    break;
+                case 'processing_error':
+                    logError("Parent: Received processing_error message from worker:", message.payload.message);
+                    this.updateStatus(`Processing Error: ${message.payload.message}`);
+                    this.showCanvas();
+                    this.destroy(); // Destroy SVG
+                    break;
+                case 'status_update':
+                    logDebug("Parent: Received status_update from worker:", message.payload.message);
+                    this.updateStatus(message.payload.message);
+                    break;
+                default:
+                    logWarn("Parent: Received unknown message type from worker:", message.type);
             }
-            this.loadingIndicator.textContent = message;
-            this.loadingIndicator.style.display = 'block';
-            logDebug("Manager's loading indicator shown:", message);
-        }
-
-        hideLoadingIndicator() {
-            if (this.loadingIndicator) {
-                this.loadingIndicator.style.display = 'none';
-                logDebug("Manager's loading indicator hidden.");
-            }
-        }
-
-        updateLoadingIndicator(message) {
-            if (this.loadingIndicator && this.loadingIndicator.style.display === 'block') {
-                this.loadingIndicator.textContent = message;
-                logDebug("Manager's loading indicator updated:", message);
-            } else if (this.uiCreated && this.statusLabel) {
-                this.updateStatus(message);
-            } else {
-                logDebug("Manager Status (no indicator/UI visible):", message);
-            }
-        }
-
-        setupIframe() {
-            logDebug("Setting up iframe...");
-            this.iframe = document.createElement('iframe');
-            this.iframe.id = IFRAME_ID;
-            this.iframe.src = 'about:blank';
-            this.iframe.style.display = 'none';
-            document.body.appendChild(this.iframe);
-            this.iframe.onload = () => {
-                logDebug("Iframe loaded ('about:blank'). Injecting content...");
-                try {
-                    this.iframe.contentWindow.document.open();
-                    this.iframe.contentWindow.document.write(iframeContent);
-                    this.iframe.contentWindow.document.close();
-                    logDebug("Iframe content injected.");
-                } catch (error) {
-                    logError("Error injecting content into iframe:", error);
-                    this.updateLoadingIndicator("Error: Failed to initialize processor iframe.");
-                    this.isIframeReady = false;
-                }
-            };
-            this.iframe.onerror = (error) => {
-                logError("Iframe loading error (onerror):", error);
-                this.updateLoadingIndicator("Error: Processor iframe failed to load.");
-                this.isIframeReady = false;
-            };
-        }
-
-        setupMessageListener() {
-            logDebug("Setting up parent message listener.");
-            window.addEventListener('message', (event) => {
-                if (!this.iframe || event.source !== this.iframe.contentWindow) {
-                    return;
-                }
-                logDebug("Parent received message:", event.data);
-                const message = event.data;
-                if (!message || !message.type) {
-                    return;
-                }
-                switch (message.type) {
-                    case 'opencv_ready':
-                        logDebug("Parent: Received opencv_ready message from iframe.");
-                        this.isIframeReady = true;
-                        this.hideLoadingIndicator();
-                        if (this.container) {
-                            this.container.style.display = 'flex';
-                        } else {
-                            logError("Cannot show container, reference missing after iframe ready!");
-                        }
-                        this.updateStatus("Ready. Select floorplan image.");
-                        break;
-                    case 'processing_complete':
-                        logDebug("Parent: Received processing_complete message.");
-                        this.updateStatus("Processing complete. Rendering SVG...");
-                        if (message.payload && message.payload.contours) {
-                            this.renderContourData(message.payload.contours, message.payload.originalWidth, message.payload.originalHeight)
-                                .then(() => {
-                                     this.updateStatus(`SVG rendered with ${message.payload.contours.length} shapes.`);
-                                     this.hideCanvas();
-                                })
-                                .catch(error => {
-                                     logError("Parent: Error rendering SVG:", error);
-                                     this.updateStatus(`Error rendering SVG: ${error.message}`);
-                                     this.showCanvas();
-                                });
-                        } else {
-                             logWarn("Parent: processing_complete message missing contour data.");
-                             this.updateStatus("Processing finished, but no contour data received.");
-                             this.showCanvas();
-                        }
-                        break;
-                    case 'processing_error':
-                        logError("Parent: Received processing_error message from iframe:", message.payload.message);
-                        this.updateStatus(`Processing Error: ${message.payload.message}`);
-                        this.showCanvas();
-                        this.destroy(); // Destroy SVG from FloorplanCreator part
-                        break;
-                    case 'status_update':
-                        logDebug("Parent: Received status_update from iframe:", message.payload.message);
-                        this.updateStatus(message.payload.message);
-                        break;
-                    default:
-                        logWarn("Parent: Received unknown message type from iframe:", message.type);
-                }
-            });
         }
 
         updateStatus(message) {
-            if (this.uiCreated && this.statusLabel && this.container && this.container.style.display === 'flex') {
+            if (this.uiCreated && this.statusLabel) {
+                 if (this.container && this.container.style.display !== 'flex' && this.isWorkerReady) {
+                      this.container.style.display = 'flex';
+                 }
                 this.statusLabel.textContent = message;
             } else {
-                 this.updateLoadingIndicator(message);
+                 logDebug("Manager Status (UI not ready):", message);
             }
-            logDebug("Manager Status:", message);
+            logDebug("Manager Status Update:", message);
         }
 
         handleFileChange(e) {
             logDebug("Manager: handleFileChange triggered.");
-            if (!this.isIframeReady) {
-                 this.updateStatus("Error: Processor is not ready. Please wait.");
+            if (!this.worker) {
+                 this.updateStatus("Error: Background processor not initialized.");
                  e.target.value = null;
                  return;
             }
+             if (!this.isWorkerReady) {
+                 this.updateStatus("Error: Processor is not ready. Please wait for OpenCV to load.");
+                 e.target.value = null;
+                 return;
+            }
+
             const file = e.target.files[0];
             if (!file || !file.type.startsWith('image/')) {
                  this.updateStatus('Error: Please select a valid image file.');
                  this.showCanvas();
-                 this.destroy(); // Destroy SVG from FloorplanCreator part
+                 this.destroy();
                  return;
             }
-            this.updateStatus('Reading file...');
+
+            this.updateStatus('Reading file for preview...');
             this.displayPreview(file);
-            logDebug(`Manager: Sending image blob (\`${file.name}\`, ${file.size} bytes) to iframe.`);
+
+            logDebug(`Manager: Sending image blob (\`${file.name}\`, ${file.size} bytes) to worker.`);
             this.updateStatus('Sending image to processor...');
-            if (this.iframe && this.iframe.contentWindow) {
-                 const imageBlobToSend = new Blob([file], { type: file.type });
-                 this.iframe.contentWindow.postMessage({
-                     type: 'process_image_blob',
-                     payload: { imageBlob: imageBlobToSend }
-                 }, '*'); // Use '*' for about:blank safety
-                 this.updateStatus('Image sent. Waiting for processing results...');
-            } else {
-                  logError("Manager: Cannot send image, iframe not available.");
-                  this.updateStatus('Error: Processor iframe connection lost.');
+            try {
+                this.worker.postMessage({
+                    type: 'process_image_blob',
+                    payload: { imageBlob: file }
+                });
+                this.updateStatus('Image sent. Waiting for processing results...');
+            } catch (error) {
+                 logError("Manager: Error posting message to worker:", error);
+                 this.updateStatus('Error sending image to processor.');
             }
         }
 
@@ -1102,7 +901,7 @@
              if (this.canvasLabel) {
                  this.canvasLabel.style.display = 'block';
              }
-             this.destroy(); // Destroy SVG from FloorplanCreator part
+             this.destroy(); // Destroy SVG
              logDebug("Manager: Canvas shown.");
          }
 
@@ -1123,15 +922,17 @@
          }
 
         closeUI() {
-            logDebug("Manager: Closing UI and iframe...");
-            super.destroy(); // Calls FloorplanCreator destroy (handles SVG)
+            logDebug("Manager: Closing UI and Worker...");
+            super.destroy(); // Calls FloorplanCreator destroy
 
-            if (this.iframe) {
+            if (this.worker) {
                 try {
-                    this.iframe.remove();
-                } catch (e) {}
-                this.iframe = null;
-                logDebug("Manager: Iframe removed.");
+                    this.worker.terminate();
+                    logDebug("Manager: Worker terminated.");
+                } catch(e) {
+                    logError("Manager: Error terminating worker:", e);
+                }
+                this.worker = null;
             }
             if (this.container) {
                  try {
@@ -1139,11 +940,8 @@
                  } catch (e) {}
                  this.container = null;
             }
-            try {
-                this.hideLoadingIndicator();
-            } catch (e) {}
 
-            this.isIframeReady = false;
+            this.isWorkerReady = false;
             this.uiCreated = false;
             logDebug("Manager: UI closed completely.");
         }
@@ -1153,7 +951,7 @@
 
 
     // --- Instantiate the Manager ---
-    logDebug("Instantiating FloorplanManager (Iframe Version)...");
+    logDebug("Instantiating FloorplanManager (Worker Version)...");
     try {
         if (typeof d3 === 'undefined') {
             throw new Error("D3 is not defined.");
@@ -1163,10 +961,8 @@
     } catch (error) {
          logError("Critical error during script startup:", error);
          alert(`Critical Error: ${error.message}. Floorplan Manager cannot start.`);
-         try {
-             showStandaloneLoadingIndicator(`Startup Error: ${error.message}`);
-         } catch(e){}
+         // try { showStandaloneLoadingIndicator(`Startup Error: ${error.message}`); } catch(e){} // No indicator element
     }
-    logDebug(`--- Floorplan Manager (Iframe Strategy, Parent Dev: ${PARENT_DEV_MODE}, Iframe Dev: ${IFRAME_DEV_MODE}) Execution Finished ---`);
+    logDebug(`--- Floorplan Manager (Worker Strategy, Parent Dev: ${PARENT_DEV_MODE}, Worker Dev: ${WORKER_DEV_MODE}) Execution Finished ---`);
 
 })(); // End IIFE
