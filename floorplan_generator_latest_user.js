@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Floorplan Manager (Worker OpenCV Fetch + 1.1.7 Logging)
 // @version      1.1.11
-// @connect      docs.opencv.org
 // @description  Uses Web Worker/fetch for OpenCV, logging logic reverted to 1.1.7 style (origin check, dev modes).
 // @author       ZLudany
 // @match        https://home.google.com/*
+// @connect      docs.opencv.org
 // @grant        none
 // @require      https://d3js.org/d3.v7.min.js
 // @require      https://d3js.org/d3-drag.v3.min.js
