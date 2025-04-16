@@ -1,7 +1,8 @@
 // ==UserScript==
-// @name         Floorplan Manager (Worker OpenCV Fetch CORS + Dev Mode)
-// @version      1.1.9
-// @description  Uses Web Worker/fetch(cors) for OpenCV, separate dev modes, standard style injection, formatted.
+// @name         Floorplan Manager (Worker OpenCV Fetch + 1.1.7 Logging)
+// @version      1.1.11
+// @connect      docs.opencv.org
+// @description  Uses Web Worker/fetch for OpenCV, logging logic reverted to 1.1.7 style (origin check, dev modes).
 // @author       ZLudany
 // @match        https://home.google.com/*
 // @grant        none
@@ -15,14 +16,15 @@
 
     // --- Configuration ---
     const PARENT_DEV_MODE = false; // Log level for the main userscript (true=alert, false=console)
-    const WORKER_DEV_MODE = false; // Log level for the Web Worker script (true=alert, false=console)
+    const WORKER_DEV_MODE = true;  // Log level for the Web Worker script (true=alert request, false=console request)
     // --- End Configuration ---
 
-    // --- Parent Logging Helpers (Now with Origin) ---
+    // --- Parent Logging Helpers (Reverted to 1.1.7 logic) ---
     function logDebug(message, ...optionalParams /*, origin = 'PARENT' - implicit last arg */ ) {
         const origin = (optionalParams.length > 0 && ['PARENT', 'WORKER'].includes(optionalParams[optionalParams.length - 1]))
                        ? optionalParams.pop()
                        : 'PARENT';
+        // Decide output based on origin's DEV_MODE flag
         const useAlert = (origin === 'PARENT' && PARENT_DEV_MODE) || (origin === 'WORKER' && WORKER_DEV_MODE);
         const prefix = `[${origin} DEBUG]`;
 
@@ -70,7 +72,7 @@
     }
     // --- End Parent Logging Helpers ---
 
-    logDebug(`--- Floorplan Manager (Worker/Fetch CORS Strategy) Execution Starting ---`);
+    logDebug(`--- Floorplan Manager (Worker/Fetch, 1.1.7 Logging) Execution Starting ---`);
 
     // --- Constants ---
     const OPENCV_URL = 'https://docs.opencv.org/4.5.4/opencv.js';
@@ -214,20 +216,24 @@
     // --- Worker Script Content ---
     const workerScriptContent = `
         // --- Worker Configuration ---
-        const WORKER_DEV_MODE = ${WORKER_DEV_MODE};
+        const WORKER_DEV_MODE = ${WORKER_DEV_MODE}; // Injected from parent
         const OPENCV_URL = '${OPENCV_URL}';
         // --- End Worker Configuration ---
 
-        // --- Worker Function Call Helper ---
+        // --- Worker Function Call Helper (Reverted to 1.1.7 logic) ---
         function callParentFunction(functionName, ...args) {
+            // Worker decides if it WANTS an alert based on WORKER_DEV_MODE
             const targetFunctionName = WORKER_DEV_MODE && functionName.startsWith('log') ? 'alert' : functionName;
-            const finalArgs = WORKER_DEV_MODE && functionName.startsWith('log') ? ["[WORKER " + functionName.toUpperCase() + "] " + args[0]].concat(args.slice(1)) : args;
-            if (targetFunctionName === 'alert') {
-                 let alertMsg = args.join(' ');
-                 self.postMessage({ type: "functionCall", payload: { functionName: 'alert', args: [alertMsg] } });
-            } else {
-                 self.postMessage({ type: "functionCall", payload: { functionName: functionName, args: args } });
-            }
+            // Parent will format the alert message if needed
+            const finalArgs = args; // Send original args
+
+            self.postMessage({
+                type: "functionCall",
+                payload: {
+                    functionName: targetFunctionName, // Request 'alert' or 'logDebug' etc.
+                    args: finalArgs
+                }
+            });
         }
         // --- End Worker Function Call Helper ---
 
@@ -266,21 +272,15 @@
             callParentFunction('logDebug', "Worker: Fetching OpenCV script via fetch()...");
             callParentFunction('updateStatus', "Worker: Fetching OpenCV...");
             try {
-                // <<<--- Use fetch with mode: 'cors' ---<<<
                 const response = await fetch(OPENCV_URL, { mode: 'cors' });
                 callParentFunction('logDebug', \`Worker: Fetch response status: \${response.status}\`);
-
                 if (!response.ok) {
-                    // Log specific CORS error if possible (often opaque)
-                    callParentFunction('logWarn', \`Fetch failed with status \${response.status}. Check Network tab & CORS headers from \${OPENCV_URL}\`);
                     throw new Error(\`HTTP error! Status: \${response.status} \${response.statusText}\`);
                 }
-
                 const scriptText = await response.text();
                 callParentFunction('logDebug', \`Worker: OpenCV script fetched successfully (\${scriptText.length} chars). Executing...\`);
                 callParentFunction('updateStatus', "Worker: Executing OpenCV Script...");
 
-                // <<<--- Execute using new Function() ---<<<
                 new Function(scriptText)();
                 callParentFunction('logDebug', "Worker: OpenCV script executed. Checking for cv.imread immediately...");
 
@@ -290,7 +290,7 @@
                     cv = self.cv;
                     isReady = true;
                     callParentFunction('logDebug', "OpenCV marked as ready in Worker (immediate check).");
-                    self.postMessage({ type: 'opencv_ready' }); // Notify parent NOW
+                    self.postMessage({ type: 'opencv_ready' });
                 } else {
                     callParentFunction('logWarn', "Worker: cv.imread NOT found immediately after execution. Relying on onRuntimeInitialized callback...");
                     callParentFunction('updateStatus', "Worker: Waiting for OpenCV WASM initialization...");
@@ -300,7 +300,6 @@
             } catch (error) {
                 callParentFunction('logError', "Worker: Failed to fetch or execute OpenCV script:", error.message, error.stack);
                 isReady = false;
-                // Error already posted via logError's postMessage call
             }
         }
 
@@ -756,7 +755,7 @@
 
                 this.worker.onmessage = this.handleWorkerMessage.bind(this);
                 this.worker.onerror = (error) => {
-                    logError("Web Worker error:", error.message, error, 'WORKER');
+                    logError("Web Worker error:", error.message, error, 'WORKER'); // Pass origin
                     this.updateStatus(`Worker Error: ${error.message}. See console.`);
                     this.isWorkerReady = false;
                 };
@@ -813,22 +812,23 @@
                     this.showCanvas();
                     this.destroy();
                     break;
-                case 'functionCall':
+                case 'functionCall': // Reverted to 1.1.7 logic
                     const { functionName, args } = message.payload;
                     if (typeof functionName === 'string' && Array.isArray(args)) {
-                        logDebug(`Parent: Worker requested call: ${functionName}(${args.length} args)`);
+                        // logDebug(`Parent: Worker requested call: ${functionName}(${args.length} args)`); // Optional log
                         const targetFunction = this[functionName] || window[functionName];
                         if (typeof targetFunction === 'function') {
                             try {
                                 if (this[functionName]) {
-                                     // Call method on this instance, pass 'WORKER' origin implicitly if needed by method
+                                     // Call method on this instance
                                      targetFunction.apply(this, args);
                                 } else if (functionName === 'alert') {
                                      // Handle alert specifically - check PARENT mode for actual alert
-                                     if (PARENT_DEV_MODE) {
-                                         alert("[WORKER] " + args.join(' '));
+                                     // Worker already decided based on WORKER_DEV_MODE if it *wants* an alert
+                                     if (PARENT_DEV_MODE || WORKER_DEV_MODE) { // Show if either is true
+                                         alert(args.join(' ')); // Alert requested message
                                      } else {
-                                         // Log worker's alert request to console if parent alerts are off
+                                         // Log worker's alert request to console if both modes are off
                                          console.log("[WORKER ALERT REQUEST]", ...args);
                                      }
                                 } else if (functionName.startsWith('log')) {
@@ -989,7 +989,7 @@
 
 
     // --- Instantiate the Manager ---
-    logDebug("Instantiating FloorplanManager (Worker/Fetch CORS Version)...");
+    logDebug("Instantiating FloorplanManager (Worker/importScripts Version)...");
     try {
         if (typeof d3 === 'undefined') {
             throw new Error("D3 is not defined.");
@@ -1001,6 +1001,6 @@
          alert(`Critical Error: ${error.message}. Floorplan Manager cannot start.`);
          // try { showStandaloneLoadingIndicator(`Startup Error: ${error.message}`); } catch(e){} // No indicator element
     }
-    logDebug(`--- Floorplan Manager (Worker/Fetch CORS Strategy, Parent Dev: ${PARENT_DEV_MODE}, Worker Dev: ${WORKER_DEV_MODE}) Execution Finished ---`);
+    logDebug(`--- Floorplan Manager (Worker/importScripts, 1.1.7 Logging) Execution Finished ---`);
 
 })(); // End IIFE
