@@ -1,29 +1,3 @@
-Okay, let's switch back to using fetch inside the worker, incorporating the CORS-related request options.
-
-Important Considerations on CORS Headers:
-
-mode: "cors": This is the standard mode for cross-origin requests using fetch. It tells the browser to follow CORS protocol (like sending preflight OPTIONS requests if needed). The server (docs.opencv.org in this case) must respond with the appropriate Access-Control-Allow-Origin header (either * or the specific origin of your script's execution context, which is tricky with workers/userscripts) for the request to succeed.
-
-credentials: "include": This option sends cookies, authentication headers, etc., with the request. This is rarely needed for public CDNs like OpenCV's and often causes CORS failures if the server doesn't explicitly allow credentials (Access-Control-Allow-Credentials: true) and specify a non-wildcard origin in Access-Control-Allow-Origin. It's generally safer to omit this or use the default (omit or same-origin).
-
-Given this, I will add mode: "cors" but omit credentials: "include" initially, as it's more likely to work. If fetch still fails specifically with a CORS error related to credentials, we could try adding it, but it's less probable to be the solution for a public resource.
-
-Changes:
-
-Modify workerScriptContent:
-
-Remove the importScripts() call and its try...catch.
-
-Reinstate the async function loadAndExecuteOpenCV().
-
-Modify the fetch call inside it to fetch(OPENCV_URL, { mode: 'cors' }).
-
-Execute the fetched script text using new Function().
-
-Keep the immediate check for cv.imread after execution and the fallback in onRuntimeInitialized.
-
-Adjust status messages requested via callParentFunction.
-
 // ==UserScript==
 // @name         Floorplan Manager (Worker OpenCV Fetch CORS + Dev Mode)
 // @version      1.1.9
