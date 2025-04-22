@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Floorplan Manager (Worker OpenCV importScripts + 1.1.7 Logging)
-// @version      1.1.23
+// @version      1.1.24
 // @description  Uses Web Worker/importScripts for OpenCV, logging logic from 1.1.7, formatted.
 // @author       ZLudany
 // @match        https://home.google.com/*
@@ -334,8 +334,6 @@
             const formattedContours = [];
 
             try {
-                const uint8Array = new Uint8Array(arrayBuffer);
-                // Uses Mat creation from array
                 const uint8Array = new Uint8Array(arrayBuffer);
                 const mat = cv.matFromArray(uint8Array.length, 1, cv.CV_8U, uint8Array);
                 src = cv.imread(mat);
