@@ -343,7 +343,7 @@
                     throw new Error("Failed to create valid image Mat from buffer");
                     callParentFunction('logDebug', \`Worker: Failed to create valid image Mat from buffer.\`);
                 }
-                callParentFunction('logDebug', \`Worker: Image decoded: ${src.cols}x${src.rows}\`);
+                callParentFunction('logDebug', \`Worker: Image decoded: \${src.cols}x\${src.rows}\`);
 
                 gray = new cv.Mat();
                 cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
