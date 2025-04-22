@@ -333,25 +333,28 @@
             let hierarchy = null;
             const formattedContours = [];
             let imageBitmap = null;
-            let offscreenCanvas = null;
-            let ctx = null;
 
             try {
-                imageBitmap = await createImageBitmap(imageBlob);
-                callParentFunction('logDebug', \`Worker: Created ImageBitmap \${imageBitmap.width}x\${imageBitmap.height}\`);
+                // Create URL from blob
+                const imageUrl = URL.createObjectURL(imageBlob);
+                
+                // Create image and wait for it to load
+                const img = await new Promise((resolve, reject) => {
+                    const image = new Image();
+                    image.onload = () => resolve(image);
+                    image.onerror = reject;
+                    image.src = imageUrl;
+                });
 
-                offscreenCanvas = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
-                ctx = offscreenCanvas.getContext('2d');
-                if (!ctx) {
-                    throw new Error("Could not get OffscreenCanvas 2D context.");
-                }
-                ctx.drawImage(imageBitmap, 0, 0);
-                callParentFunction('logDebug', "Worker: Image drawn to OffscreenCanvas.");
-                imageBitmap.close();
+                // Clean up URL
+                URL.revokeObjectURL(imageUrl);
 
-                src = cv.imread(offscreenCanvas);
+                callParentFunction('logDebug', \`Worker: Loaded image \${img.width}x\${img.height}\`);
+
+                // Read directly from image into OpenCV
+                src = cv.imread(img);
                 if (src.empty()) {
-                    throw new Error("cv.imread failed from OffscreenCanvas.");
+                    throw new Error("cv.imread failed from Image.");
                 }
 
                 gray = new cv.Mat();
@@ -390,8 +393,8 @@
                     type: 'processing_complete',
                     payload: {
                         contours: formattedContours,
-                        originalWidth: offscreenCanvas.width,
-                        originalHeight: offscreenCanvas.height
+                        originalWidth: img.width,
+                        originalHeight: img.height
                     }
                 });
 
