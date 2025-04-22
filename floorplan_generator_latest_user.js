@@ -335,11 +335,15 @@
 
             try {
                 const uint8Array = new Uint8Array(arrayBuffer);
-                src = cv.imdecode(uint8Array, cv.IMREAD_COLOR);
-                if (src.empty()) {
-                    throw new Error("cv.imdecode failed to load image.");
-                    callParentFunction('logDebug', \`Worker: cv.imdecode failed to load image.\`);
+                // Uses Mat creation from array
+                const uint8Array = new Uint8Array(arrayBuffer);
+                const mat = cv.matFromArray(uint8Array.length, 1, cv.CV_8U, uint8Array);
+                src = cv.imread(mat);
+                if (!src || src.empty()) {
+                    throw new Error("Failed to create valid image Mat from buffer");
+                    callParentFunction('logDebug', \`Worker: Failed to create valid image Mat from buffer.\`);
                 }
+                callParentFunction('logDebug', \`Worker: Image decoded: ${src.cols}x${src.rows}\`);
 
                 gray = new cv.Mat();
                 cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
@@ -385,27 +389,14 @@
             } catch (error) {
                 callParentFunction('logError', "Worker processing error:", error);
             } finally {
-                if (src) {
-                    src.delete();
-                }
-                if (gray) {
-                    gray.delete();
-                }
-                if (edges) {
-                    edges.delete();
-                }
-                if (contours) {
-                    contours.delete();
-                }
-                if (hierarchy) {
-                    hierarchy.delete();
-                }
+                // Cleanup OpenCV objects
+                [src, gray, edges, contours, hierarchy, mat].forEach(mat => {
+                    if (mat) mat.delete();
+                });
                 callParentFunction('logDebug', "Worker: OpenCV Mats cleaned up.");
             }
         }
-
         callParentFunction('logDebug', "Worker: Event listener set up. Waiting for messages or OpenCV init.");
-
     `; // End workerScriptContent
 
 
