@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Floorplan Manager (Worker OpenCV importScripts + 1.1.7 Logging)
-// @version      1.1.13
+// @version      1.1.14
 // @description  Uses Web Worker/importScripts for OpenCV, logging logic from 1.1.7, formatted.
 // @author       ZLudany
 // @match        https://home.google.com/*
