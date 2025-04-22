@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Floorplan Manager (Worker OpenCV importScripts + 1.1.7 Logging)
-// @version      1.1.24
+// @version      1.1.25
 // @description  Uses Web Worker/importScripts for OpenCV, logging logic from 1.1.7, formatted.
 // @author       ZLudany
 // @match        https://home.google.com/*
@@ -334,9 +334,15 @@
             const formattedContours = [];
 
             try {
-                const uint8Array = new Uint8Array(arrayBuffer);
-                const mat = cv.matFromArray(uint8Array.length, 1, cv.CV_8U, uint8Array);
-                src = cv.imread(mat);
+                // Create a temporary canvas in memory
+                const blob = new Blob([arrayBuffer]);
+                const imageBitmap = await createImageBitmap(blob);
+                const canvas = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(imageBitmap, 0, 0);
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                // Create Mat from ImageData
+                src = cv.matFromImageData(imageData);
                 if (!src || src.empty()) {
                     throw new Error("Failed to create valid image Mat from buffer");
                     callParentFunction('logDebug', \`Worker: Failed to create valid image Mat from buffer.\`);
