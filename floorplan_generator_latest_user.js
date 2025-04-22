@@ -856,7 +856,7 @@
                  return;
             }
             this.updateStatus('Reading file for preview...');
-            logDebug("Manager: preparing file to worker:", error);
+            logDebug(`Manager: Sending image file (\`${file.name}\`, ${file.size} bytes) to worker.`);
             this.preparingArrayBuffer(file);
             this.displayPreview(file);
         }
