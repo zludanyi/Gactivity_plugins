@@ -306,24 +306,24 @@
                 return;
             }
 
-            if (message.type === 'process_image_blob') {
+            if (message.type === 'process_image_buffer') {
                 if (!isReady || !cv) {
-                    callParentFunction('logError', "Worker: Received image blob but OpenCV is not ready.");
+                    callParentFunction('logError', "Worker: Received image buffer but OpenCV is not ready.");
                     return;
                 }
-                if (!(message.payload && message.payload.imageBlob instanceof Blob)) {
-                    callParentFunction('logError', "Worker: Invalid image blob received.");
+                if (!(message.payload && message.payload.buffer instanceof ArrayBuffer)) {
+                    callParentFunction('logError', "Worker: Invalid image buffer received.");
                     return;
                 }
-                await processImageBlob(message.payload.imageBlob);
+                await processImageBuffer(message.payload.buffer);
             } else {
                 callParentFunction('logWarn', "Worker: Received unknown message type:", message.type);
             }
         };
 
         // --- Image Processing Function ---
-        async function processImageBlob(imageBlob) {
-            callParentFunction('logDebug', "Worker: Starting image blob processing.");
+        async function processImageBuffer(arrayBuffer) {
+            callParentFunction('logDebug', "Worker: Starting image buffer processing.");
             callParentFunction('updateStatus', "Worker: Processing image...");
 
             let src = null;
@@ -332,29 +332,13 @@
             let contours = null;
             let hierarchy = null;
             const formattedContours = [];
-            let imageBitmap = null;
 
             try {
-                // Create URL from blob
-                const imageUrl = URL.createObjectURL(imageBlob);
-                
-                // Create image and wait for it to load
-                const img = await new Promise((resolve, reject) => {
-                    const image = new Image();
-                    image.onload = () => resolve(image);
-                    image.onerror = reject;
-                    image.src = imageUrl;
-                });
-
-                // Clean up URL
-                URL.revokeObjectURL(imageUrl);
-
-                callParentFunction('logDebug', \`Worker: Loaded image \${img.width}x\${img.height}\`);
-
-                // Read directly from image into OpenCV
-                src = cv.imread(img);
+                const uint8Array = new Uint8Array(arrayBuffer);
+                src = cv.imdecode(uint8Array, cv.IMREAD_COLOR);
                 if (src.empty()) {
-                    throw new Error("cv.imread failed from Image.");
+                    throw new Error("cv.imdecode failed to load image.");
+                    callParentFunction('logDebug', \`Worker: cv.imdecode failed to load image.\`);
                 }
 
                 gray = new cv.Mat();
@@ -393,8 +377,8 @@
                     type: 'processing_complete',
                     payload: {
                         contours: formattedContours,
-                        originalWidth: img.width,
-                        originalHeight: img.height
+                        originalWidth: src.cols,
+                        originalHeight: src.rows
                     }
                 });
 
@@ -415,9 +399,6 @@
                 }
                 if (hierarchy) {
                     hierarchy.delete();
-                }
-                if (imageBitmap && !imageBitmap.closed) {
-                    imageBitmap.close();
                 }
                 callParentFunction('logDebug', "Worker: OpenCV Mats cleaned up.");
             }
@@ -862,12 +843,11 @@
                  e.target.value = null;
                  return;
             }
-             if (!this.isWorkerReady) {
+            if (!this.isWorkerReady) {
                  this.updateStatus("Error: Processor is not ready. Please wait for OpenCV to load.");
                  e.target.value = null;
                  return;
             }
-
             const file = e.target.files[0];
             if (!file || !file.type.startsWith('image/')) {
                  this.updateStatus('Error: Please select a valid image file.');
@@ -875,22 +855,41 @@
                  this.destroy();
                  return;
             }
-
             this.updateStatus('Reading file for preview...');
+            logDebug("Manager: preparing file to worker:", error);
+            this.preparingArrayBuffer(file);
             this.displayPreview(file);
+        }
 
-            logDebug(`Manager: Sending image blob (\`${file.name}\`, ${file.size} bytes) to worker.`);
-            this.updateStatus('Sending image to processor...');
-            try {
-                this.worker.postMessage({
-                    type: 'process_image_blob',
-                    payload: { imageBlob: file }
-                });
-                this.updateStatus('Image sent. Waiting for processing results...');
-            } catch (error) {
-                 logError("Manager: Error posting message to worker:", error);
-                 this.updateStatus('Error sending image to processor.');
-            }
+        preparingArrayBuffer(file){
+            // Use FileReader to read as arrayBuffer;
+            const reader = new FileReader();
+            reader.onload = () => {
+                // Convert to Uint8Array for OpenCV processing
+                const arrayBuffer = reader.result;
+                const uint8Array = new Uint8Array(arrayBuffer);
+                try{
+                    // Send to worker
+                    this.worker.postMessage({
+                        type: 'process_image_buffer',
+                        payload: { 
+                            buffer: uint8Array.buffer,
+                            imageType: file.type
+                        }
+                    }, [uint8Array.buffer]); // Transfer ownership of the buffer
+                    logDebug(`Manager: Sending image blob (\`${file.name}\`, ${file.size} bytes) to worker.`);
+                    this.updateStatus('Sending image to processor...');
+                } catch (error) {
+                    logError("Manager: Error posting message to worker:", error);
+                    this.updateStatus('Error sending image to processor.');
+                }
+            };
+            reader.onerror = (error) => {
+                logError("Error reading file:", error);
+                this.updateStatus('Error reading image file.');
+            };
+            // Read as ArrayBuffer instead of DataURL
+            reader.readAsArrayBuffer(file);
         }
 
         displayPreview(file) {
