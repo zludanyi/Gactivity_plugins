@@ -1,18 +1,16 @@
 // ==UserScript==
-// @name         Floorplan Manager (Worker OpenCV importScripts + 1.1.7 Logging)
-// @version      1.1.25
-// @description  Uses Web Worker/importScripts for OpenCV, logging logic from 1.1.7, formatted.
+// @name         Floorplan Manager (Generic Worker + Global Deps - Formatted)
+// @version      1.2.4
+// @description  Loads D3 globally, uses generic worker importer for OpenCV, formatted.
 // @author       ZLudany
 // @match        https://home.google.com/*
-// @connect      docs.opencv.org // Keep connect for importScripts
+// @connect      docs.opencv.org
+// @connect      d3js.org
 // @sandbox      DOM
 // @grant        none
-// @require      https://d3js.org/d3.v7.min.js
-// @require      https://d3js.org/d3-drag.v3.min.js
-// @require      https://d3js.org/d3-zoom.v3.min.js
 // ==/UserScript==
 
-(function() {
+(async function() {
     'use strict';
 
     // --- Configuration ---
@@ -20,14 +18,13 @@
     const WORKER_DEV_MODE = true;  // Log level for the Web Worker script (true=alert request, false=console request)
     // --- End Configuration ---
 
-    // --- Parent Logging Helpers (Reverted to 1.1.7 logic) ---
+    // --- Parent Logging Helpers (Origin-aware) ---
     function logDebug(message, ...optionalParams /*, origin = 'PARENT' - implicit last arg */ ) {
         const origin = (optionalParams.length > 0 && ['PARENT', 'WORKER'].includes(optionalParams[optionalParams.length - 1]))
                        ? optionalParams.pop()
                        : 'PARENT';
         const useAlert = (origin === 'PARENT' && PARENT_DEV_MODE) || (origin === 'WORKER' && WORKER_DEV_MODE);
         const prefix = `[${origin} DEBUG]`;
-
         if (useAlert) {
             let alertMsg = prefix + " " + message;
             if (optionalParams.length > 0) {
@@ -41,7 +38,7 @@
         } else {
             console.log(prefix, message, ...optionalParams);
         }
-    }
+    } // End logDebug
 
     function logWarn(message, ...optionalParams /*, origin = 'PARENT' */ ) {
         const origin = (optionalParams.length > 0 && ['PARENT', 'WORKER'].includes(optionalParams[optionalParams.length - 1]))
@@ -50,7 +47,6 @@
         const useAlert = (origin === 'PARENT' && PARENT_DEV_MODE) || (origin === 'WORKER' && WORKER_DEV_MODE);
         const prefix = `[${origin} WARN]`;
         const fullMessage = prefix + " " + message;
-
         if (useAlert) {
             let alertMsg = fullMessage;
             if (optionalParams.length > 0) {
@@ -64,7 +60,7 @@
         } else {
             console.warn(fullMessage, ...optionalParams);
         }
-    }
+    } // End logWarn
 
     function logError(message, ...optionalParams /*, origin = 'PARENT' */ ) {
         const origin = (optionalParams.length > 0 && ['PARENT', 'WORKER'].includes(optionalParams[optionalParams.length - 1]))
@@ -73,7 +69,6 @@
         const useAlert = (origin === 'PARENT' && PARENT_DEV_MODE) || (origin === 'WORKER' && WORKER_DEV_MODE);
         const prefix = `[${origin} ERROR]`;
         const fullMessage = prefix + " " + message;
-
         if (useAlert) {
             let alertMsg = fullMessage;
             if (optionalParams.length > 0) {
@@ -87,10 +82,10 @@
         } else {
             console.error(fullMessage, ...optionalParams);
         }
-    }
+    } // End logError
     // --- End Parent Logging Helpers ---
 
-    logDebug(`--- Floorplan Manager (Worker/importScripts, 1.1.7 Logging) Execution Starting ---`);
+    logDebug(`--- Floorplan Manager (Generic Worker + Global Deps) Execution Starting ---`);
 
     // --- Constants ---
     const OPENCV_URL = 'https://docs.opencv.org/4.5.4/opencv.js';
@@ -112,7 +107,7 @@
         } catch (e) {
             logError("Error adding global styles:", e);
         }
-    }
+    } // End addGlobalStyle
     // --- End Style Helper ---
 
     // --- CSS Styles ---
@@ -230,178 +225,448 @@
     `;
     addGlobalStyle(cssStyles);
 
+    // --- Helper: Load Script Tag ---
+    function loadScriptTag(url) {
+        return new Promise((resolve, reject) => {
+            logDebug(`Loading global script: ${url}`);
+            const script = document.createElement('script');
+            script.src = url;
+            script.async = false; // Load sequentially
+            script.onload = () => {
+                logDebug(`Global script loaded: ${url}`);
+                resolve();
+            };
+            script.onerror = (err) => {
+                logError(`Failed to load global script: ${url}`, err);
+                reject(new Error(`Failed to load script: ${url}`));
+            };
+            (document.head || document.documentElement).appendChild(script);
+        });
+    } // End loadScriptTag
+    // --- End Helper ---
+
 
     // --- Worker Script Content ---
     const workerScriptContent = `
         // --- Worker Configuration ---
-        const WORKER_DEV_MODE = ${WORKER_DEV_MODE}; // Injected from parent
-        const OPENCV_URL = '${OPENCV_URL}';
+        const WORKER_DEV_MODE = ${WORKER_DEV_MODE};
+        // const OPENCV_URL = '${OPENCV_URL}'; // URL passed via config now
         // --- End Worker Configuration ---
 
-        // --- Worker Function Call Helper (Reverted to 1.1.7 logic) ---
+        // --- Worker Function Call Helper ---
         function callParentFunction(functionName, ...args) {
-            // Worker decides if it WANTS an alert based on WORKER_DEV_MODE
             const targetFunctionName = WORKER_DEV_MODE && functionName.startsWith('log') ? 'alert' : functionName;
-            // Parent will format the alert message if needed
-            const finalArgs = args; // Send original args
-
-            self.postMessage({
-                type: "functionCall",
-                payload: {
-                    functionName: targetFunctionName, // Request 'alert' or 'logDebug' etc.
-                    args: finalArgs
-                }
-            });
+            const finalArgs = WORKER_DEV_MODE && functionName.startsWith('log') ? [\`[\${SCRIPT_NAME} \${functionName.toUpperCase()}] \${args[0]}\`].concat(args.slice(1)) : args;
+            self.postMessage({ type: "functionCall", payload: { functionName: targetFunctionName, args: finalArgs } });
         }
         // --- End Worker Function Call Helper ---
 
-        callParentFunction('logDebug', "Worker script started.");
+        // --- Injected Config Placeholder ---
+        const SCRIPT_NAME = '%%SCRIPT_NAME%%';
+        const SCRIPT_URL = '%%SCRIPT_URL%%';
+        const NAMESPACE = '%%NAMESPACE%%';
+        const REGISTER_NAMESPACE = %%REGISTER_NAMESPACE%%;
+        const INIT_RUNTIME_STRING = \`%%INIT_RUNTIME_STRING%%\`;
+        // --- End Injected Config Placeholder ---
 
-        let cv = null;
+        callParentFunction('logDebug', \`Worker '\${SCRIPT_NAME}' script started.\`);
+
+        let internalNamespace = null;
         let isReady = false;
 
-        // Define Module for OpenCV initialization
-        self.Module = {
-            onRuntimeInitialized: () => {
-                callParentFunction('logDebug', ">>> Module.onRuntimeInitialized fired.");
-                // Check cv.imread here - this is the definitive confirmation
-                if (typeof self.cv !== 'undefined' && self.cv && typeof self.cv.imread === 'function') {
-                    cv = self.cv;
-                    isReady = true;
-                    callParentFunction('logDebug', "OpenCV is ready in Worker (onRuntimeInitialized confirmed).");
-                    self.postMessage({ type: 'opencv_ready' }); // Notify parent state change
-                } else {
-                    callParentFunction('logError', "Worker: onRuntimeInitialized fired, but cv or cv.imread is invalid!");
-                }
-            },
-            onAbort: (reason) => {
-                 callParentFunction('logError', "Worker OpenCV WASM Aborted:", reason);
-                 isReady = false;
-            }
-        };
-        callParentFunction('logDebug', "Worker: Module defined. Importing OpenCV script via importScripts()...");
-        callParentFunction('updateStatus', "Worker: Loading OpenCV..."); // Request status update
-
-        // --- Load OpenCV using importScripts ---
-        try {
-            importScripts(OPENCV_URL); // <<<--- Attempt to load the script
-            callParentFunction('logDebug', "Worker: importScripts call completed for OpenCV. Waiting for onRuntimeInitialized...");
-            callParentFunction('updateStatus', "Worker: Waiting for OpenCV WASM initialization...");
-        } catch (error) {
-            // <<<--- Catch potential CSP or network errors here ---<<<
-            callParentFunction('logError', "Worker: importScripts FAILED for OpenCV:", error.message, error.stack);
-            callParentFunction('updateStatus', "Worker: Failed to load OpenCV (Security Policy or Network Error).");
-            isReady = false;
-            // Error is posted back via logError helper
+        // --- Pre-definitions ---
+        if (REGISTER_NAMESPACE && NAMESPACE) {
+            self[NAMESPACE] = {};
+            callParentFunction('logDebug', \`Namespace '\${NAMESPACE}' registered.\`);
         }
-        // --- End Load OpenCV ---
+        %%EXPECTED_VARIABLES%%
+        callParentFunction('logDebug', "Expected variables defined (if any).");
+
+        // --- Execute Pre-Runtime Code (e.g., Module definition) ---
+        %%EXPECTED_RUNTIME%%
+        callParentFunction('logDebug', "Expected runtime executed (if any).");
 
 
-        // --- Message Handling ---
+        // --- Load Script ---
+        callParentFunction('logDebug', \`Worker '\${SCRIPT_NAME}': Importing script: \${SCRIPT_URL}\`);
+        callParentFunction('updateStatus', \`Worker '\${SCRIPT_NAME}': Loading script...\`);
+        try {
+            importScripts(SCRIPT_URL);
+            callParentFunction('logDebug', \`Worker '\${SCRIPT_NAME}': importScripts call completed. Waiting for initialization logic (if any)...\`);
+            if (!self.Module || !self.Module.onRuntimeInitialized) {
+                 callParentFunction('logWarn', \`Worker '\${SCRIPT_NAME}': No Module.onRuntimeInitialized detected. Readiness depends on script behavior.\`);
+                 if (NAMESPACE) { if (typeof self[NAMESPACE] !== 'undefined' && self[NAMESPACE]) { internalNamespace = self[NAMESPACE]; isReady = true; callParentFunction('logDebug', \`Script '\${SCRIPT_NAME}' ready immediately after import (namespace found).\`); self.postMessage({ type: 'script_ready', payload: { scriptName: SCRIPT_NAME } }); } else { callParentFunction('logWarn', \`Script '\${SCRIPT_NAME}' imported, but namespace '\${NAMESPACE}' not found immediately.\`); } }
+                 else { callParentFunction('logWarn', \`Script '\${SCRIPT_NAME}' imported, no runtime/namespace check. Assuming ready.\`); isReady = true; self.postMessage({ type: 'script_ready', payload: { scriptName: SCRIPT_NAME } }); }
+            } else { callParentFunction('logDebug', \`Worker '\${SCRIPT_NAME}': Waiting for Module.onRuntimeInitialized...\`); callParentFunction('updateStatus', \`Worker '\${SCRIPT_NAME}': Waiting for WASM/runtime initialization...\`); }
+        } catch (error) { callParentFunction('logError', \`Worker '\${SCRIPT_NAME}': importScripts FAILED:\`, error.message, error.stack); callParentFunction('updateStatus', \`Worker '\${SCRIPT_NAME}': Failed to load script.\`); isReady = false; self.postMessage({ type: 'worker_error', payload: { scriptName: SCRIPT_NAME, message: 'importScripts failed: ' + error.message } }); }
+
+        // --- Function to Evaluate Initialization Runtime ---
+        function evaluateInitializationRuntime() {
+            if (INIT_RUNTIME_STRING && INIT_RUNTIME_STRING !== '%%INIT_RUNTIME_STRING%%') {
+                callParentFunction('logDebug', \`Worker '\${SCRIPT_NAME}': Evaluating initializationRuntime...\`);
+                try { new Function(INIT_RUNTIME_STRING)(); callParentFunction('logDebug', \`Worker '\${SCRIPT_NAME}': initializationRuntime evaluated successfully.\`); }
+                catch (e) { callParentFunction('logError', \`Worker '\${SCRIPT_NAME}': Error evaluating initializationRuntime:\`, e.message, e.stack); self.postMessage({ type: 'worker_error', payload: { scriptName: SCRIPT_NAME, message: 'Error evaluating init functions: ' + e.message } }); }
+            } else { callParentFunction('logDebug', \`Worker '\${SCRIPT_NAME}': No initializationRuntime provided.\`); }
+        }
+
+
+        // --- Message Handling for Execution Requests ---
         self.onmessage = async (event) => {
-            console.log("[WORKER INTERNAL] Received message:", event.data); // Keep console log
+            console.log(\`[\${SCRIPT_NAME} WORKER INTERNAL] Received message:\`, event.data);
+            const message = event.data;
+            if (!message || !message.type) { callParentFunction('logWarn', "Worker: Received message with no type."); return; }
+
+            if (message.type === 'executeFunction') {
+                const { functionName, args, callId } = message.payload;
+                callParentFunction('logDebug', \`Worker '\${SCRIPT_NAME}' received request to execute: \${functionName}\`);
+                if (!isReady) { callParentFunction('logError', \`Worker '\${SCRIPT_NAME}' cannot execute '\${functionName}', not ready.\`); self.postMessage({ type: 'execution_error', payload: { callId: callId, message: \`Worker '\${SCRIPT_NAME}' not ready.\` } }); return; }
+                if (!internalNamespace && NAMESPACE) { if (typeof self[NAMESPACE] !== 'undefined' && self[NAMESPACE]) { internalNamespace = self[NAMESPACE]; } else { callParentFunction('logError', \`Worker '\${SCRIPT_NAME}' cannot execute '\${functionName}', namespace '\${NAMESPACE}' not found.\`); self.postMessage({ type: 'execution_error', payload: { callId: callId, message: \`Namespace '\${NAMESPACE}' not found in worker.\` } }); return; } }
+                const func = internalNamespace ? internalNamespace[functionName] : self[functionName];
+                if (typeof func !== 'function') { callParentFunction('logError', \`Worker '\${SCRIPT_NAME}': Function '\${functionName}' not found.\`); self.postMessage({ type: 'execution_error', payload: { callId: callId, message: \`Function '\${functionName}' not found in worker '\${SCRIPT_NAME}'.\` } }); return; }
+                try { const context = internalNamespace || self; const result = await func.apply(context, args); callParentFunction('logDebug', \`Worker '\${SCRIPT_NAME}': Function '\${functionName}' executed successfully.\`); if (functionName !== 'processImageBuffer') { self.postMessage({ type: 'execution_result', payload: { callId: callId, result: result } }); } }
+                catch (error) { callParentFunction('logError', \`Worker '\${SCRIPT_NAME}': Error executing function '\${functionName}':\`, error.message, error.stack); self.postMessage({ type: 'execution_error', payload: { callId: callId, message: \`Error executing \${functionName}: \${error.message}\` } }); }
+            } else { callParentFunction('logWarn', "Worker: Received unknown message type:", message.type); }
+        };
+
+        // --- Modify Module.onRuntimeInitialized to also evaluate runtime ---
+        const originalOnRuntimeInitialized = self.Module ? self.Module.onRuntimeInitialized : null;
+        if (self.Module) {
+            self.Module.onRuntimeInitialized = () => {
+                if (originalOnRuntimeInitialized) { originalOnRuntimeInitialized(); }
+                if (isReady) { evaluateInitializationRuntime(); } // Evaluate if already marked ready
+                else { callParentFunction('logWarn', "onRuntimeInitialized called, but worker not marked ready yet."); if (typeof self.cv !== 'undefined' && self.cv && typeof self.cv.imread === 'function') { cv = self.cv; isReady = true; callParentFunction('logDebug', "OpenCV readiness confirmed late by onRuntimeInitialized re-check."); self.postMessage({ type: 'script_ready', payload: { scriptName: SCRIPT_NAME } }); evaluateInitializationRuntime(); } }
+            };
+        } else { callParentFunction('logWarn', "Worker: self.Module was not defined before importScripts."); }
+
+        callParentFunction('logDebug', "Worker: Event listener set up. Waiting for messages or OpenCV init.");
+
+    `; // End workerScriptContent
+
+
+    // --- CORS Script Importer Class ---
+    logDebug("Defining CORSscriptImporter class...");
+    class CORSscriptImporter {
+        scriptsConfig = { globalDependencies: [], workerScripts: [] };
+        workers = {};
+        parentManager = null;
+        globalScriptsLoaded = false;
+        globalLoadPromise = null;
+
+        constructor(configObject, parentManagerInstance) {
+            logDebug("CORSscriptImporter constructor called.");
+            if (typeof configObject !== 'object' || configObject === null) {
+                throw new Error("CORSscriptImporter requires a configuration object.");
+            }
+            if (!parentManagerInstance) {
+                throw new Error("CORSscriptImporter requires a parent manager instance.");
+            }
+            this.scriptsConfig.globalDependencies = Array.isArray(configObject.globalDependencies) ? configObject.globalDependencies : [];
+            this.scriptsConfig.workerScripts = Array.isArray(configObject.workerScripts) ? configObject.workerScripts : [];
+            this.parentManager = parentManagerInstance;
+            this.workers = {};
+            this.globalScriptsLoaded = false;
+            this.globalLoadPromise = null;
+        } // End constructor
+
+        async loadGlobalDependencies() {
+            if (this.globalLoadPromise) {
+                logDebug("Global dependencies already loading or loaded.");
+                return this.globalLoadPromise;
+            }
+            logDebug(`Loading ${this.scriptsConfig.globalDependencies.length} global dependency group(s)...`);
+            this.parentManager.updateStatus("Loading core libraries...");
+
+            let promiseChain = Promise.resolve();
+            this.scriptsConfig.globalDependencies.forEach(depGroup => {
+                if (depGroup.name && Array.isArray(depGroup.URLS)) {
+                    logDebug(`Loading global dependency group: ${depGroup.name}`);
+                    depGroup.URLS.forEach(url => {
+                        promiseChain = promiseChain.then(() => loadScriptTag(url));
+                    });
+                } else {
+                    logWarn("Skipping invalid global dependency group:", depGroup);
+                }
+            });
+
+            this.globalLoadPromise = promiseChain
+                .then(() => {
+                    this.globalScriptsLoaded = true;
+                    logDebug("All global dependencies loaded successfully.");
+                    this.parentManager.updateStatus("Core libraries loaded.");
+                })
+                .catch(error => {
+                    logError("Failed to load one or more global dependencies.", error);
+                    this.parentManager.updateStatus("Error loading core libraries!");
+                    this.globalScriptsLoaded = false;
+                    throw error;
+                });
+
+            return this.globalLoadPromise;
+        } // End loadGlobalDependencies
+
+        initializeWorkers() {
+            if (!this.globalScriptsLoaded) {
+                 logError("Cannot initialize workers before global dependencies are loaded.");
+                 return Promise.reject(new Error("Global dependencies failed to load."));
+            }
+            logDebug(`Initializing ${this.scriptsConfig.workerScripts.length} worker(s)...`);
+            const workerPromises = [];
+            this.scriptsConfig.workerScripts.forEach(scriptConfig => {
+                if (!scriptConfig.name || !scriptConfig.url) {
+                    logError("Invalid worker script config entry:", scriptConfig);
+                    return;
+                }
+                if (this.workers[scriptConfig.name]) {
+                    logWarn(`Worker '${scriptConfig.name}' already exists.`);
+                    return;
+                }
+
+                logDebug(`Creating worker for: ${scriptConfig.name}`);
+                this.workers[scriptConfig.name] = {
+                    worker: null,
+                    status: 'initializing',
+                    readyPromise: null,
+                    resolveReady: null,
+                    rejectReady: null
+                };
+                const readyPromise = new Promise((resolve, reject) => {
+                    this.workers[scriptConfig.name].resolveReady = resolve;
+                    this.workers[scriptConfig.name].rejectReady = reject;
+                });
+                this.workers[scriptConfig.name].readyPromise = readyPromise;
+                workerPromises.push(readyPromise);
+
+                this.createWorker(scriptConfig);
+            });
+            return Promise.allSettled(workerPromises);
+        } // End initializeWorkers
+
+        async initializeAll() {
+            logDebug("CORSscriptImporter: Starting initialization...");
+            try {
+                await this.loadGlobalDependencies();
+                await this.initializeWorkers();
+                logDebug("CORSscriptImporter: Initialization sequence completed (workers started).");
+            } catch (error) {
+                 logError("CORSscriptImporter: Initialization failed.", error);
+                 throw error;
+            }
+        } // End initializeAll
+
+        createWorker(scriptConfig) {
+            const scriptName = scriptConfig.name;
+            try {
+                const workerCode = this.generateWorkerScript(scriptConfig);
+                const blob = new Blob([workerCode], { type: 'application/javascript' });
+                const workerUrl = URL.createObjectURL(blob);
+                const worker = new Worker(workerUrl);
+                URL.revokeObjectURL(workerUrl);
+
+                this.workers[scriptName].worker = worker;
+                this.workers[scriptName].status = 'loading';
+
+                worker.onmessage = (event) => this.handleWorkerMessage(scriptName, event);
+                worker.onerror = (error) => {
+                    logError(`Worker error for '${scriptName}':`, error.message, error, 'WORKER');
+                    this.workers[scriptName].status = 'error';
+                    this.workers[scriptName].rejectReady(new Error(`Worker for ${scriptName} failed: ${error.message}`));
+                    if (this.parentManager.onWorkerError) {
+                        this.parentManager.onWorkerError(scriptName, `Worker script error: ${error.message}`);
+                    }
+                };
+                logDebug(`Worker for '${scriptName}' created successfully.`);
+            } catch (error) {
+                logError(`Failed to create worker for '${scriptName}':`, error);
+                this.workers[scriptName].status = 'error';
+                this.workers[scriptName].rejectReady(new Error(`Failed to create worker for ${scriptName}: ${error.message}`));
+                 if (this.parentManager.onWorkerError) {
+                     this.parentManager.onWorkerError(scriptName, `Failed to create worker: ${error.message}`);
+                 }
+            }
+        } // End createWorker
+
+        generateWorkerScript(config) {
+            let code = workerScriptContent;
+            code = code.replace('%%SCRIPT_NAME%%', config.name || 'unknown');
+            code = code.replace('%%SCRIPT_URL%%', config.url || '');
+            code = code.replace('%%NAMESPACE%%', config.nameSpace || '');
+            code = code.replace('%%REGISTER_NAMESPACE%%', config.registerNamespace ? 'true' : 'false');
+            code = code.replace('%%EXPECTED_VARIABLES%%', config.expectedVariables ? Object.entries(config.expectedVariables).map(([key, value]) => `let ${key} = ${JSON.stringify(value)};`).join('\\n') : '');
+            const escapedExpectedRuntime = (config.expectedRuntime || '').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+            code = code.replace('%%EXPECTED_RUNTIME%%', `try { new Function(\`${escapedExpectedRuntime}\`)(); } catch(e) { callParentFunction('logError', "Error executing expectedRuntime:", e.message, e.stack); self.postMessage({ type: 'worker_error', payload: { scriptName: SCRIPT_NAME, message: 'Error in expectedRuntime: ' + e.message } }); }`);
+            const escapedInitRuntime = (config.initializationRuntime || '').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+            code = code.replace('%%INIT_RUNTIME_STRING%%', escapedInitRuntime);
+            return code;
+        } // End generateWorkerScript
+
+        handleWorkerMessage(scriptName, event) {
+            logDebug(`Parent received message from worker '${scriptName}':`, event.data);
             const message = event.data;
             if (!message || !message.type) {
-                callParentFunction('logWarn', "Worker: Received message with no type.");
                 return;
             }
 
-            if (message.type === 'process_image_buffer') {
-                if (!isReady || !cv) {
-                    callParentFunction('logError', "Worker: Received image buffer but OpenCV is not ready.");
-                    return;
-                }
-                if (!(message.payload && message.payload.buffer instanceof ArrayBuffer)) {
-                    callParentFunction('logError', "Worker: Invalid image buffer received.");
-                    return;
-                }
-                await processImageBuffer(message.payload.buffer);
-            } else {
-                callParentFunction('logWarn', "Worker: Received unknown message type:", message.type);
+            const workerInfo = this.workers[scriptName];
+            if (!workerInfo) {
+                logError(`Received message for unknown worker: ${scriptName}`);
+                return;
             }
-        };
 
-        // --- Image Processing Function ---
-        async function processImageBuffer(arrayBuffer) {
-            callParentFunction('logDebug', "Worker: Starting image buffer processing.");
-            callParentFunction('updateStatus', "Worker: Processing image...");
+            switch (message.type) {
+                case 'script_ready':
+                case 'opencv_ready':
+                    logDebug(`Worker '${scriptName}' reported ready.`);
+                    workerInfo.status = 'ready';
+                    workerInfo.resolveReady();
+                    if (this.parentManager.onWorkerReady) {
+                        this.parentManager.onWorkerReady(scriptName);
+                    }
+                    break;
+                case 'worker_error':
+                    logError(`Worker '${scriptName}' reported an error:`, message.payload.message);
+                    workerInfo.status = 'error';
+                    workerInfo.rejectReady(new Error(message.payload.message));
+                     if (this.parentManager.onWorkerError) {
+                         this.parentManager.onWorkerError(scriptName, message.payload.message);
+                     }
+                    break;
+                case 'processing_complete':
+                     if (this.parentManager.onProcessingComplete) {
+                         this.parentManager.onProcessingComplete(scriptName, message.payload);
+                     }
+                    break;
+                case 'status_update':
+                     if (this.parentManager.updateStatus) {
+                         this.parentManager.updateStatus(`[${scriptName}] ${message.payload.message}`);
+                     }
+                    break;
+                case 'functionCall':
+                    const { functionName, args } = message.payload;
+                    if (typeof functionName === 'string' && Array.isArray(args)) {
+                        const targetFunction = this.parentManager[functionName] || window[functionName];
+                        if (typeof targetFunction === 'function') {
+                            try {
+                                if (this.parentManager[functionName]) {
+                                    targetFunction.apply(this.parentManager, args);
+                                } else if (functionName === 'alert') {
+                                    if (PARENT_DEV_MODE || WORKER_DEV_MODE) {
+                                        alert("[WORKER] " + args.join(' '));
+                                    } else {
+                                        console.log("[WORKER ALERT REQUEST]", ...args);
+                                    }
+                                } else if (functionName.startsWith('log')) {
+                                    targetFunction(...args, 'WORKER');
+                                }
+                            } catch (e) {
+                                logError(`Parent: Error executing requested worker function '${functionName}':`, e);
+                            }
+                        } else {
+                            logWarn(`Parent received request to call unknown/disallowed function from worker '${scriptName}': ${functionName}`);
+                        }
+                    } else {
+                        logWarn(`Parent received invalid functionCall message format from worker '${scriptName}'.`);
+                    }
+                    break;
+                case 'execution_result':
+                    logDebug(`Worker '${scriptName}' execution result:`, message.payload);
+                    // Resolve promise associated with callId (requires storing promises)
+                    break;
+                case 'execution_error':
+                    logError(`Worker '${scriptName}' execution error:`, message.payload.message);
+                    // Reject promise associated with callId (requires storing promises)
+                    break;
+                default:
+                    logWarn(`Parent: Received unknown message type from worker '${scriptName}':`, message.type);
+            }
+        } // End handleWorkerMessage
 
-            let src = null;
-            let gray = null;
-            let edges = null;
-            let contours = null;
-            let hierarchy = null;
-            const formattedContours = [];
+        isReady(scriptName) {
+            return this.workers[scriptName]?.status === 'ready';
+        } // End isReady
 
-            try {
-                // Create a temporary canvas in memory
-                const blob = new Blob([arrayBuffer]);
-                const imageBitmap = await createImageBitmap(blob);
-                const canvas = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(imageBitmap, 0, 0);
-                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                // Create Mat from ImageData
-                src = cv.matFromImageData(imageData);
-                if (!src || src.empty()) {
-                    throw new Error("Failed to create valid image Mat from buffer");
-                    callParentFunction('logDebug', \`Worker: Failed to create valid image Mat from buffer.\`);
+        waitReady(scriptName) {
+            if (!this.workers[scriptName]) {
+                return Promise.reject(new Error(`No worker configured: ${scriptName}`));
+            }
+            return this.workers[scriptName].readyPromise;
+        } // End waitReady
+
+        executeFunctionInWorker(scriptName, functionName, args = []) {
+            return new Promise((resolve, reject) => {
+                const workerInfo = this.workers[scriptName];
+                if (!workerInfo || !workerInfo.worker) {
+                    return reject(new Error(`Worker '${scriptName}' not found.`));
                 }
-                callParentFunction('logDebug', \`Worker: Image decoded: \${src.cols}x\${src.rows}\`);
+                if (workerInfo.status !== 'ready') {
+                    return reject(new Error(`Worker '${scriptName}' not ready.`));
+                }
 
-                gray = new cv.Mat();
-                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-                cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
-                edges = new cv.Mat();
-                cv.Canny(gray, edges, 50, 100);
-                contours = new cv.MatVector();
-                hierarchy = new cv.Mat();
-                cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-                callParentFunction('logDebug', \`Worker: Found \${contours.size()} raw contours.\`);
+                const callId = `${scriptName}-${functionName}-${Date.now()}-${Math.random()}`;
 
-                const minArea = 50;
-                for (let i = 0; i < contours.size(); ++i) {
-                    const contour = contours.get(i);
-                    try {
-                         const area = cv.contourArea(contour);
-                         if (area < minArea || contour.rows < 3) {
-                             continue;
-                         }
-                         const pointsArray = [];
-                         const pointData = contour.data32S;
-                         for (let j = 0; j < contour.rows; ++j) {
-                             pointsArray.push({ x: pointData[j * 2], y: pointData[j * 2 + 1] });
-                         }
-                         formattedContours.push({ id: \`worker-contour-\${Date.now()}-\${i}\`, points: pointsArray });
-                    } finally {
-                        if(contour) {
-                            contour.delete();
+                const messageHandler = (event) => {
+                    const response = event.data;
+                    if (response && response.payload && response.payload.callId === callId) {
+                        workerInfo.worker.removeEventListener('message', messageHandler);
+                        if (response.type === 'execution_result') {
+                            logDebug(`Received result for callId ${callId}`);
+                            resolve(response.payload.result);
+                        } else if (response.type === 'execution_error') {
+                            logError(`Received error for callId ${callId}: ${response.payload.message}`);
+                            reject(new Error(response.payload.message));
                         }
                     }
+                };
+                workerInfo.worker.addEventListener('message', messageHandler);
+
+                logDebug(`Requesting worker '${scriptName}' to execute '${functionName}' with callId ${callId}`);
+                const success = this.postMessageToWorker(scriptName, {
+                    type: 'executeFunction',
+                    payload: { functionName, args, callId }
+                });
+
+                if (!success) {
+                    workerInfo.worker.removeEventListener('message', messageHandler);
+                    reject(new Error(`Failed to post execution request to worker '${scriptName}'.`));
                 }
-                callParentFunction('logDebug', \`Worker: Processed \${formattedContours.length} valid contours.\`);
+            });
+        } // End executeFunctionInWorker
 
-                self.postMessage({
-                    type: 'processing_complete',
-                    payload: {
-                        contours: formattedContours,
-                        originalWidth: src.cols,
-                        originalHeight: src.rows
+        postMessageToWorker(scriptName, message, transferList = []) {
+             const workerInfo = this.workers[scriptName];
+             if (!workerInfo || !workerInfo.worker) {
+                 logError(`Cannot post message: Worker '${scriptName}' not found.`);
+                 return false;
+             }
+              if (workerInfo.status !== 'ready') {
+                 logWarn(`Posting message to worker '${scriptName}' which is not ready (status: ${workerInfo.status}).`);
+             }
+             try {
+                 workerInfo.worker.postMessage(message, transferList);
+                 return true;
+             } catch (error) {
+                  logError(`Error posting message to worker '${scriptName}':`, error);
+                  return false;
+             }
+        } // End postMessageToWorker
+
+        terminateAll() {
+            logDebug("Terminating all workers...");
+            Object.entries(this.workers).forEach(([name, info]) => {
+                if (info.worker) {
+                    try {
+                        info.worker.terminate();
+                        logDebug(`Worker '${name}' terminated.`);
+                    } catch (e) {
+                        logError(`Error terminating worker '${name}':`, e);
                     }
-                });
+                }
+                info.status = 'terminated';
+            });
+            this.workers = {};
+        } // End terminateAll
 
-            } catch (error) {
-                callParentFunction('logError', "Worker processing error:", error);
-            } finally {
-                // Cleanup OpenCV objects
-                [src, gray, edges, contours, hierarchy, mat].forEach(mat => {
-                    if (mat) mat.delete();
-                });
-                callParentFunction('logDebug', "Worker: OpenCV Mats cleaned up.");
-            }
-        }
-        callParentFunction('logDebug', "Worker: Event listener set up. Waiting for messages or OpenCV init.");
-    `; // End workerScriptContent
+    } // End CORSscriptImporter Class
+    logDebug("CORSscriptImporter class defined.");
 
 
     // --- Floorplan SVG Creator Class (Parent Scope) ---
@@ -435,7 +700,7 @@
             this.targetWidth = targetWidth;
             this.targetHeight = targetHeight;
             logDebug("FloorplanCreator initialized in parent.");
-        }
+        } // End constructor
 
         renderContourData(contourData, originalWidth, originalHeight) {
              if (!contourData) {
@@ -446,7 +711,7 @@
              logDebug(`FloorplanCreator: Received ${contourData.length} contours. Original size: ${originalWidth}x${originalHeight}`);
              this.contourData = this.scaleContours(contourData, originalWidth, originalHeight);
              return this.render();
-        }
+        } // End renderContourData
 
         scaleContours(rawContours, originalWidth, originalHeight) {
             if (!originalWidth || !originalHeight) {
@@ -464,7 +729,7 @@
                      y: Math.round(p.y * scale)
                  }))
              }));
-        }
+        } // End scaleContours
 
         render() {
             const self = this;
@@ -520,7 +785,7 @@
                     }
                 }, 0);
             });
-        }
+        } // End render
 
         setupZoom() {
             if (!this.d3) {
@@ -535,7 +800,7 @@
             this.zoom = this.d3.zoom()
                 .scaleExtent([0.1, 10])
                 .on('zoom', zoomed);
-        }
+        } // End setupZoom
 
         setupDrag() {
             if (!this.d3) {
@@ -570,7 +835,7 @@
                         .style('stroke', creatorInstance.POLYGON_STROKE)
                         .style('stroke-width', creatorInstance.POLYGON_STROKE_WIDTH);
                 });
-        }
+        } // End setupDrag
 
         destroy() {
             if (this.svgContainer) {
@@ -587,15 +852,15 @@
                 this.zoom = null;
                 logDebug("FloorplanCreator: SVG destroyed.");
             }
-        }
-    }
+        } // End destroy
+    } // End FloorplanCreator Class
     logDebug("FloorplanCreator class defined.");
 
 
     // --- Floorplan Manager Class (Parent Scope) ---
     logDebug("Defining FloorplanManager class...");
     class FloorplanManager extends FloorplanCreator {
-        worker = null;
+        corsImporter = null;
         isWorkerReady = false;
         uiCreated = false;
         container = null;
@@ -606,64 +871,257 @@
         canvasCtx = null;
         canvasLabel = null;
         closeButton = null;
+        d3 = null; // Hold D3 instance
+
+        // --- Configuration for the CORS Importer ---
+        CORSscriptURLs = {
+            // Global dependencies loaded into the main thread first
+            globalDependencies: [
+                 { name: "d3js", URLS: [ // Load D3 and plugins globally
+                     'https://d3js.org/d3.v7.min.js',
+                     'https://d3js.org/d3-drag.v3.min.js',
+                     'https://d3js.org/d3-zoom.v3.min.js'
+                 ]}
+            ],
+            // Scripts to load into dedicated workers
+            workerScripts: [{
+                name: "openCV",
+                url: OPENCV_URL,
+                nameSpace: "cv",
+                registerNamespace: false,
+                expectedVariables: { // Define variables needed in worker scope
+                    cv: null,
+                    isReady: false
+                },
+                // Code executed before importScripts (defines Module)
+                expectedRuntime: `
+                    self.Module = {
+                        onRuntimeInitialized: () => {
+                            callParentFunction('logDebug', ">>> \${SCRIPT_NAME} Module.onRuntimeInitialized fired.");
+                            if (typeof self.cv !== 'undefined' && self.cv && typeof self.cv.imread === 'function') {
+                                cv = self.cv; // Assign to worker's 'cv' variable
+                                isReady = true; // Set worker's internal flag
+                                callParentFunction('logDebug', "OpenCV is ready in Worker (onRuntimeInitialized confirmed).");
+                                self.postMessage({ type: 'script_ready', payload: { scriptName: SCRIPT_NAME } }); // Use generic ready signal
+
+                                // Evaluate post-load functions AFTER ready
+                                evaluateInitializationRuntime();
+
+                            } else {
+                                callParentFunction('logError', "Worker '\${SCRIPT_NAME}': onRuntimeInitialized fired, but cv or cv.imread is invalid!");
+                                self.postMessage({ type: 'worker_error', payload: { scriptName: SCRIPT_NAME, message: 'OpenCV loaded but invalid.' } });
+                            }
+                        },
+                        onAbort: (reason) => {
+                             callParentFunction('logError', "Worker '\${SCRIPT_NAME}' OpenCV WASM Aborted:", reason);
+                             isReady = false; // Reset internal flag
+                             self.postMessage({ type: 'worker_error', payload: { scriptName: SCRIPT_NAME, message: 'OpenCV WASM Aborted: ' + reason } });
+                        }
+                    };
+                `,
+                // Function(s) defined in worker *after* OpenCV is ready
+                initializationRuntime: `
+                    async function processImageBuffer(arrayBuffer, imageType) {
+                        callParentFunction('logDebug', "Worker: Starting image buffer processing.");
+                        callParentFunction('updateStatus', "Worker: Processing image...");
+
+                        let src = null;
+                        let gray = null;
+                        let edges = null;
+                        let contours = null;
+                        let hierarchy = null;
+                        const formattedContours = [];
+                        let imageBitmap = null;
+                        let offscreenCanvas = null;
+                        let ctx = null;
+                        let mat = null;
+
+                        try {
+                            const data = new Uint8Array(arrayBuffer);
+                            mat = cv.imdecode(data, cv.IMREAD_UNCHANGED);
+                            if (!mat || mat.empty()) {
+                                 callParentFunction('logWarn', "Worker: cv.imdecode failed, attempting OffscreenCanvas fallback...");
+                                 try {
+                                     const blob = new Blob([arrayBuffer], {type: imageType || 'image/png'});
+                                     imageBitmap = await createImageBitmap(blob);
+                                     offscreenCanvas = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
+                                     ctx = offscreenCanvas.getContext('2d');
+                                     if (!ctx) throw new Error("Could not get OffscreenCanvas 2D context for fallback.");
+                                     ctx.drawImage(imageBitmap, 0, 0);
+                                     src = cv.imread(offscreenCanvas);
+                                     imageBitmap.close();
+                                 } catch (canvasError) {
+                                      callParentFunction('logError', "Worker: OffscreenCanvas fallback also failed:", canvasError);
+                                      throw new Error("Failed to decode image using both imdecode and OffscreenCanvas.");
+                                 }
+                            } else {
+                                src = mat;
+                                mat = null;
+                            }
+
+                            if (!src || src.empty()) {
+                                throw new Error("Failed to create valid image Mat from buffer");
+                            }
+                            callParentFunction('logDebug', \`Worker: Image decoded: \${src.cols}x\${src.rows}\`);
+
+                            gray = new cv.Mat();
+                            if (src.channels() === 4) {
+                                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+                            } else if (src.channels() === 3) {
+                                cv.cvtColor(src, gray, cv.COLOR_RGB2GRAY);
+                            } else if (src.channels() === 1) {
+                                gray = src.clone();
+                            } else {
+                                throw new Error(\`Unsupported number of channels: \${src.channels()}\`);
+                            }
+
+                            cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+                            edges = new cv.Mat();
+                            cv.Canny(gray, edges, 50, 100);
+                            contours = new cv.MatVector();
+                            hierarchy = new cv.Mat();
+                            cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+                            callParentFunction('logDebug', \`Worker: Found \${contours.size()} raw contours.\`);
+
+                            const minArea = 50;
+                            for (let i = 0; i < contours.size(); ++i) {
+                                const contour = contours.get(i);
+                                try {
+                                     const area = cv.contourArea(contour);
+                                     if (area < minArea || contour.rows < 3) {
+                                         continue;
+                                     }
+                                     const pointsArray = [];
+                                     const pointData = contour.data32S;
+                                     for (let j = 0; j < contour.rows; ++j) {
+                                         pointsArray.push({ x: pointData[j * 2], y: pointData[j * 2 + 1] });
+                                     }
+                                     formattedContours.push({ id: \`worker-contour-\${Date.now()}-\${i}\`, points: pointsArray });
+                                } finally {
+                                    if(contour) {
+                                        contour.delete();
+                                    }
+                                }
+                            }
+                            callParentFunction('logDebug', \`Worker: Processed \${formattedContours.length} valid contours.\`);
+
+                            self.postMessage({
+                                type: 'processing_complete',
+                                payload: {
+                                    contours: formattedContours,
+                                    originalWidth: src.cols,
+                                    originalHeight: src.rows
+                                }
+                            });
+
+                        } catch (error) {
+                            callParentFunction('logError', "Worker processing error:", error);
+                        } finally {
+                            [src, gray, edges, contours, hierarchy, mat].forEach(m => {
+                                if (m && !m.isDeleted()) {
+                                    try {
+                                        m.delete();
+                                    } catch(e){}
+                                }
+                            });
+                            if (imageBitmap && !imageBitmap.closed) {
+                                try {
+                                    imageBitmap.close();
+                                } catch(e){}
+                            }
+                            callParentFunction('logDebug', "Worker: OpenCV Mats cleaned up.");
+                        }
+                    }
+                ` // End initializationRuntime string
+            }]
+        };
+        // --- End CORS Config ---
+
 
         constructor() {
             logDebug("FloorplanManager constructor started.");
-            if (typeof d3 === 'undefined' || !d3) {
-                logError("FATAL: D3 library failed!");
-                throw new Error("D3 library failed to load.");
-            }
-            logDebug("FloorplanManager: D3 found.");
-            const baseContainerElement = document.createElement('div');
-            baseContainerElement.id = 'floorplan-container';
-            logDebug("FloorplanManager: Calling super(FloorplanCreator constructor)...");
-            super(baseContainerElement, d3, 800, 600);
-            logDebug("FloorplanManager: super(FloorplanCreator constructor) finished.");
-            this.container = baseContainerElement;
-            logDebug("FloorplanManager: 'this.container' assigned.");
-            try {
+            // Initialize non-DOM properties first.
+            this.corsImporter = null;
+            this.isWorkerReady = false;
+            this.uiCreated = false;
+            this.container = null;
+            this.controlsDiv = null;
+            this.fileInput = null;
+            this.statusLabel = null;
+            this.canvas = null;
+            this.canvasCtx = null;
+            this.canvasLabel = null;
+            this.closeButton = null;
+            this.d3 = null;
+
+            // Start the asynchronous initialization process
+            this.asyncInitialize();
+            logDebug("FloorplanManager constructor finished (async init started).");
+        } // End constructor
+
+        async asyncInitialize() {
+             logDebug("FloorplanManager asyncInitialize started.");
+             try {
+                // 1. Initialize Importer and Load Global Dependencies
+                this.updateStatus("Initializing Core Libraries...");
+                this.corsImporter = new CORSscriptImporter(this.CORSscriptURLs, this);
+                await this.corsImporter.loadGlobalDependencies();
+                logDebug("Global dependencies loaded.");
+
+                // 2. Check if D3 loaded correctly
+                if (typeof window.d3 === 'undefined' || !window.d3) {
+                    throw new Error("D3 library failed to load globally.");
+                }
+                this.d3 = window.d3;
+                logDebug("D3 confirmed available globally.");
+
+                // 3. Create UI Container (needed for super call)
+                const baseContainerElement = document.createElement('div');
+                baseContainerElement.id = 'floorplan-container';
+
+                // 4. Call super() constructor (FloorplanCreator)
+                logDebug("FloorplanManager: Calling super(FloorplanCreator constructor)...");
+                super(baseContainerElement, this.d3, 800, 600);
+                logDebug("FloorplanManager: super(FloorplanCreator constructor) finished.");
+                this.container = baseContainerElement;
+                logDebug("FloorplanManager: 'this.container' assigned.");
+
+                // 5. Populate and Append UI
                 logDebug("FloorplanManager: Populating UI container...");
                 this.populateUIContainer();
                 this.uiCreated = true;
                 logDebug("FloorplanManager: UI container populated.");
-            } catch(e) {
-                logError("FloorplanManager: Error populating UI container:", e);
-                if (this.container) {
-                    try {
-                        this.container.remove();
-                    } catch(remErr){}
-                }
-                this.container = null;
-                this.uiCreated = false;
-                this.updateStatus(`Error Creating UI: ${e.message}`);
-                throw new Error(`Failed to populate UI: ${e.message}`);
-            }
-            try {
                 logDebug("FloorplanManager: Appending main container to DOM...");
                 const rootEl = document.documentElement || document.body;
                 if (rootEl) {
                     rootEl.appendChild(this.container);
-                    logDebug("FloorplanManager: Main container appended.");
                 } else {
                     throw new Error("Could not find documentElement or body to append UI.");
                 }
-            } catch (e) {
-                logError("FloorplanManager: Error appending UI container:", e);
-                if (this.container) {
-                    try {
-                        this.container.remove();
-                    } catch(remErr){}
-                }
-                this.container = null;
-                this.uiCreated = false;
-                this.updateStatus(`Error Displaying UI: ${e.message}`);
-                throw new Error(`Failed to append UI: ${e.message}`);
-            }
+                logDebug("FloorplanManager: Main container appended.");
 
-            this.updateStatus("Initializing OpenCV Processor (Worker)...");
-            this.setupWorker();
-            logDebug("FloorplanManager constructor finished successfully.");
-        }
+                // 6. Initialize Workers (now that UI is ready for status updates)
+                this.updateStatus("Initializing OpenCV Processor (Worker)...");
+                this.corsImporter.initializeWorkers();
+                await this.corsImporter.waitReady('openCV');
+
+                logDebug("Manager: OpenCV worker is ready.");
+                this.isWorkerReady = true;
+                if (this.container) {
+                    this.container.style.display = 'flex'; // Show UI
+                }
+                this.updateStatus("Ready. Select floorplan image.");
+
+            } catch (error) {
+                 logError("FloorplanManager asyncInitialize failed:", error);
+                 this.updateStatus(`Initialization Error: ${error.message}`);
+                 if (this.container && this.container.parentElement) {
+                     this.container.remove();
+                 }
+                 this.uiCreated = false;
+            }
+        } // End asyncInitialize
+
 
         populateUIContainer() {
             if (!this.container) {
@@ -711,113 +1169,49 @@
                 logError("Manager populateUI: Close button missing.");
             }
             logDebug("Manager: UI elements populated in container.");
-        }
+        } // End populateUIContainer
 
-        setupWorker() {
-            logDebug("Setting up Web Worker...");
-            try {
-                const blob = new Blob([workerScriptContent], { type: 'application/javascript' });
-                const workerUrl = URL.createObjectURL(blob);
-                this.worker = new Worker(workerUrl);
-                URL.revokeObjectURL(workerUrl);
+        // --- Manager-specific Worker Callbacks ---
+        onWorkerReady(scriptName) {
+            logDebug(`Manager notified that worker '${scriptName}' is ready.`);
+        } // End onWorkerReady
 
-                this.worker.onmessage = this.handleWorkerMessage.bind(this);
-                this.worker.onerror = (error) => {
-                    logError("Web Worker error:", error.message, error, 'WORKER'); // Pass origin
-                    this.updateStatus(`Worker Error: ${error.message}. See console.`);
-                    this.isWorkerReady = false;
-                };
-                logDebug("Web Worker created and listeners attached.");
-
-            } catch (error) {
-                logError("Failed to create Web Worker:", error);
-                this.updateStatus("Error: Could not initialize background processor.");
+        onWorkerError(scriptName, errorMessage) {
+            logError(`Manager notified of error in worker '${scriptName}': ${errorMessage}`);
+            this.updateStatus(`Error in ${scriptName} worker: ${errorMessage}`);
+            if (scriptName === 'openCV') {
                 this.isWorkerReady = false;
             }
-        }
+        } // End onWorkerError
 
-        handleWorkerMessage(event) {
-            logDebug("Parent received message from worker:", event.data);
-            const message = event.data;
-            if (!message || !message.type) {
-                return;
-            }
-
-            switch (message.type) {
-                case 'opencv_ready':
-                    logDebug("Parent: Worker reported OpenCV is ready.");
-                    this.isWorkerReady = true;
-                    if (this.container) {
-                        this.container.style.display = 'flex';
-                    } else {
-                        logError("Cannot show container, reference missing after worker ready!");
-                    }
-                    this.updateStatus("Ready. Select floorplan image.");
-                    break;
-                case 'processing_complete':
-                    logDebug("Parent: Received processing_complete message.");
-                    this.updateStatus("Processing complete. Rendering SVG...");
-                    if (message.payload && message.payload.contours) {
-                        this.renderContourData(message.payload.contours, message.payload.originalWidth, message.payload.originalHeight)
-                            .then(() => {
-                                 this.updateStatus(`SVG rendered with ${message.payload.contours.length} shapes.`);
-                                 this.hideCanvas();
-                            })
-                            .catch(error => {
-                                 logError("Parent: Error rendering SVG:", error);
-                                 this.updateStatus(`Error rendering SVG: ${error.message}`);
-                                 this.showCanvas();
-                            });
-                    } else {
-                         logWarn("Parent: processing_complete message missing contour data.");
-                         this.updateStatus("Processing finished, but no contour data received.");
+        onProcessingComplete(scriptName, payload) {
+            logDebug(`Manager received processing complete from '${scriptName}'`);
+            this.updateStatus("Processing complete. Rendering SVG...");
+            if (payload && payload.contours) {
+                this.renderContourData(payload.contours, payload.originalWidth, payload.originalHeight)
+                    .then(() => {
+                         this.updateStatus(`SVG rendered with ${payload.contours.length} shapes.`);
+                         this.hideCanvas();
+                    })
+                    .catch(error => {
+                         logError("Parent: Error rendering SVG:", error);
+                         this.updateStatus(`Error rendering SVG: ${error.message}`);
                          this.showCanvas();
-                    }
-                    break;
-                case 'processing_error':
-                    // Error is logged by the worker via functionCall below
-                    this.updateStatus(`Processing Error: ${message.payload.message}`);
-                    this.showCanvas();
-                    this.destroy();
-                    break;
-                case 'functionCall': // Reverted to 1.1.7 logic
-                    const { functionName, args } = message.payload;
-                    if (typeof functionName === 'string' && Array.isArray(args)) {
-                        // logDebug(`Parent: Worker requested call: ${functionName}(${args.length} args)`); // Optional log
-                        const targetFunction = this[functionName] || window[functionName];
-                        if (typeof targetFunction === 'function') {
-                            try {
-                                if (this[functionName]) {
-                                     // Call method on this instance
-                                     targetFunction.apply(this, args);
-                                } else if (functionName === 'alert') {
-                                     // Handle alert specifically - check PARENT mode for actual alert
-                                     // Worker already decided based on WORKER_DEV_MODE if it *wants* an alert
-                                     if (PARENT_DEV_MODE || WORKER_DEV_MODE) { // Show if either is true
-                                         alert("[WORKER] " + args.join(' ')); // Alert requested message
-                                     } else {
-                                         // Log worker's alert request to console if both modes are off
-                                         console.log("[WORKER ALERT REQUEST]", ...args);
-                                     }
-                                } else if (functionName.startsWith('log')) {
-                                     // Call global loggers, passing 'WORKER' as origin
-                                     targetFunction(...args, 'WORKER');
-                                }
-                                // Add other safe global functions if needed
-                            } catch (e) {
-                                logError(`Parent: Error executing requested worker function '${functionName}':`, e);
-                            }
-                        } else {
-                            logWarn(`Parent received request to call unknown/disallowed function from worker: ${functionName}`);
-                        }
-                    } else {
-                        logWarn("Parent received invalid functionCall message format from worker.");
-                    }
-                    break;
-                  default:
-                    logWarn("Parent: Received unknown message type from worker:", message.type);
+                    });
+            } else {
+                 logWarn("Parent: processing_complete message missing contour data.");
+                 this.updateStatus("Processing finished, but no contour data received.");
+                 this.showCanvas();
             }
-        }
+        } // End onProcessingComplete
+
+        onProcessingError(scriptName, errorMessage) {
+            logError(`Manager received processing error from '${scriptName}': ${errorMessage}`);
+            this.updateStatus(`Processing Error: ${errorMessage}`);
+            this.showCanvas();
+            this.destroy();
+        } // End onProcessingError
+        // --- End Worker Callbacks ---
 
         updateStatus(message) {
             if (this.uiCreated && this.statusLabel) {
@@ -825,57 +1219,61 @@
                       this.container.style.display = 'flex';
                  }
                 this.statusLabel.textContent = message;
-            } else {
-                 logDebug("Manager Status (UI not ready):", message);
             }
-            logDebug("Manager Status Update:", message); // Log with default 'PARENT' origin
-        }
+            logDebug("Manager Status Update:", message);
+        } // End updateStatus
 
         handleFileChange(e) {
             logDebug("Manager: handleFileChange triggered.");
-            if (!this.worker) {
-                 this.updateStatus("Error: Background processor not initialized.");
-                 e.target.value = null;
-                 return;
+            if (!this.corsImporter) {
+                this.updateStatus("Error: Importer not initialized.");
+                e.target.value = null;
+                return;
             }
-            if (!this.isWorkerReady) {
-                 this.updateStatus("Error: Processor is not ready. Please wait for OpenCV to load.");
-                 e.target.value = null;
-                 return;
+            if (!this.corsImporter.isReady('openCV')) {
+                this.updateStatus("Error: OpenCV processor is not ready.");
+                e.target.value = null;
+                return;
             }
+
             const file = e.target.files[0];
             if (!file || !file.type.startsWith('image/')) {
-                 this.updateStatus('Error: Please select a valid image file.');
-                 this.showCanvas();
-                 this.destroy();
-                 return;
+                this.updateStatus('Error: Please select a valid image file.');
+                this.showCanvas();
+                this.destroy();
+                return;
             }
-            this.updateStatus('Reading file for preview...');
-            logDebug(`Manager: Sending image file (\`${file.name}\`, ${file.size} bytes) to worker.`);
-            this.preparingArrayBuffer(file);
-            this.displayPreview(file);
-        }
 
-        preparingArrayBuffer(file){
-            // Use FileReader to read as arrayBuffer;
+            this.updateStatus('Reading file for preview...');
+            this.displayPreview(file);
+
             const reader = new FileReader();
             reader.onload = () => {
-                // Convert to Uint8Array for OpenCV processing
                 const arrayBuffer = reader.result;
-                const uint8Array = new Uint8Array(arrayBuffer);
-                try{
-                    // Send to worker
-                    this.worker.postMessage({
-                        type: 'process_image_buffer',
-                        payload: { 
-                            buffer: uint8Array.buffer,
-                            imageType: file.type
+                if (!arrayBuffer) {
+                    logError("Error reading file into ArrayBuffer.");
+                    this.updateStatus('Error reading image file.');
+                    return;
+                }
+                logDebug(`Manager: Sending image ArrayBuffer (\`${file.name}\`, ${file.size} bytes) to worker 'openCV'.`);
+                this.updateStatus('Sending image to processor...');
+
+                const success = this.corsImporter.postMessageToWorker(
+                    'openCV',
+                    {
+                        type: 'executeFunction',
+                        payload: {
+                            functionName: 'processImageBuffer',
+                            args: [arrayBuffer, file.type],
+                            callId: `process-${Date.now()}`
                         }
-                    }, [uint8Array.buffer]); // Transfer ownership of the buffer
-                    logDebug(`Manager: Sending image blob (\`${file.name}\`, ${file.size} bytes) to worker.`);
-                    this.updateStatus('Sending image to processor...');
-                } catch (error) {
-                    logError("Manager: Error posting message to worker:", error);
+                    },
+                    [arrayBuffer]
+                );
+
+                if (success) {
+                    this.updateStatus('Image sent. Waiting for processing results...');
+                } else {
                     this.updateStatus('Error sending image to processor.');
                 }
             };
@@ -883,9 +1281,8 @@
                 logError("Error reading file:", error);
                 this.updateStatus('Error reading image file.');
             };
-            // Read as ArrayBuffer instead of DataURL
             reader.readAsArrayBuffer(file);
-        }
+        } // End handleFileChange
 
         displayPreview(file) {
              const reader = new FileReader();
@@ -916,7 +1313,7 @@
                  this.updateCanvasLabel("Could not read file for preview.");
              };
              reader.readAsDataURL(file);
-        }
+        } // End displayPreview
 
         showCanvas() {
              if (this.canvas) {
@@ -927,7 +1324,7 @@
              }
              this.destroy();
              logDebug("Manager: Canvas shown.");
-         }
+         } // End showCanvas
 
          hideCanvas() {
              if (this.canvas) {
@@ -937,26 +1334,21 @@
                  this.canvasLabel.style.display = 'none';
              }
              logDebug("Manager: Canvas hidden.");
-         }
+         } // End hideCanvas
 
          updateCanvasLabel(text) {
             if (this.canvasLabel) {
                 this.canvasLabel.textContent = text;
             }
-         }
+         } // End updateCanvasLabel
 
         closeUI() {
-            logDebug("Manager: Closing UI and Worker...");
-            super.destroy();
+            logDebug("Manager: Closing UI and Workers...");
+            super.destroy(); // Calls FloorplanCreator destroy
 
-            if (this.worker) {
-                try {
-                    this.worker.terminate();
-                    logDebug("Manager: Worker terminated.");
-                } catch(e) {
-                    logError("Manager: Error terminating worker:", e);
-                }
-                this.worker = null;
+            if (this.corsImporter) {
+                this.corsImporter.terminateAll();
+                this.corsImporter = null;
             }
             if (this.container) {
                  try {
@@ -968,25 +1360,22 @@
             this.isWorkerReady = false;
             this.uiCreated = false;
             logDebug("Manager: UI closed completely.");
-        }
+        } // End closeUI
 
     } // End FloorplanManager Class
     logDebug("FloorplanManager class defined.");
 
 
     // --- Instantiate the Manager ---
-    logDebug("Instantiating FloorplanManager (Worker/importScripts Version)...");
+    logDebug("Instantiating FloorplanManager (Generic Worker + Globals Version)...");
     try {
-        if (typeof d3 === 'undefined') {
-            throw new Error("D3 is not defined.");
-        }
-        new FloorplanManager();
-        logDebug("FloorplanManager instance created.");
+        // D3 check happens inside asyncInitialize now
+        new FloorplanManager(); // Constructor starts async initialization
+        logDebug("FloorplanManager instance created, async initialization running.");
     } catch (error) {
-         logError("Critical error during script startup:", error);
+         logError("Critical error during script startup (Instantiation):", error);
          alert(`Critical Error: ${error.message}. Floorplan Manager cannot start.`);
-         // try { showStandaloneLoadingIndicator(`Startup Error: ${error.message}`); } catch(e){} // No indicator element
     }
-    logDebug(`--- Floorplan Manager (Worker/importScripts, 1.1.7 Logging) Execution Finished ---`);
+    logDebug(`--- Floorplan Manager (Generic Worker + Globals) Execution Finished ---`);
 
 })(); // End IIFE
