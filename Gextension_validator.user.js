@@ -671,5 +671,4 @@ console.log(\`Processed: \${processData(data)}\`);`;
         }
     }
     initializeApp();
-}
-```
+};
