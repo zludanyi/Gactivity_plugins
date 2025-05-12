@@ -14,7 +14,7 @@
 const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_12';
 const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_12';
 let runOriginalScriptMainIIFE = true;
-
+window.ZLU = {};
 function getFunc(f){
     if (typeof f !== 'function') { return null; }
     return f.name ? f.name : (f.toString().match(/(function)(\s+)(\w+)(\()/)?.[3] || 'anonymous');
@@ -158,10 +158,10 @@ if (runOriginalScriptMainIIFE) {
         const ACORN_WORKER_SOURCE = `
 self.onmessage = async (event) => {
     // Destructure all expected code strings, including esutils parts
-    const { sourceCode, acornCode, escodegenCode, estraverseCode, sourceMapCode, 
-            esutilsAstCode, esutilsCodeCode, esutilsKeywordCode, esutilsMainCode, 
+    const { sourceCode, acornCode, escodegenCode, estraverseCode, sourceMapCode,
+            esutilsAstCode, esutilsCodeCode, esutilsKeywordCode, esutilsMainCode,
             functionsToIgnore } = event.data;
-    
+
     // Save original global properties that might be overwritten during eval
     const originalWindow = self.window;
     const originalRequire = self.require;
@@ -180,34 +180,34 @@ self.onmessage = async (event) => {
             if (moduleName === 'fs') { console.warn("Worker: Mocked 'fs' module requested. Returning empty object."); return {}; }
             if (moduleName === 'path') { console.warn("Worker: Mocked 'path' module requested. Returning empty object."); return {}; }
             if (moduleName === './package.json') { console.warn("Worker: Mocked './package.json' module requested."); return { version: 'mocked-version' }; }
-            
+
             // For esutils internal requires (relative paths)
             if (moduleName === './ast' && tempModules.esutils_ast) return tempModules.esutils_ast;
             if (moduleName === './code' && tempModules.esutils_code) return tempModules.esutils_code;
             if (moduleName === './keyword' && tempModules.esutils_keyword) return tempModules.esutils_keyword;
-            
+
             // For direct requires of main modules by name
             if (moduleName === 'source-map' && (typeof self.sourceMap === 'object' || typeof self.sourceMap === 'function')) return self.sourceMap;
             if (moduleName === 'estraverse' && (typeof self.estraverse === 'object' || typeof self.estraverse === 'function')) return self.estraverse;
             if (moduleName === 'esutils' && (typeof self.esutils === 'object' || typeof self.esutils === 'function')) return self.esutils;
-            
+
             if (typeof originalRequire === 'function') { // Fallback if an original 'require' existed (unlikely in clean worker)
                 return originalRequire.apply(this, arguments);
             }
             console.error("Worker: Mock require cannot resolve module:", moduleName);
             throw new Error("Worker: Mock require cannot resolve module: " + moduleName);
         };
-        
+
         var module, exports; // Declare for function scope within evalLibrary, accessible by eval'd code
 
         // Helper to eval a library and assign its export
         function evalLibrary(code, libName, selfPropertyName, tempModuleStoreName) {
             if (code && ( (selfPropertyName && typeof self[selfPropertyName] === 'undefined') || (tempModuleStoreName && typeof tempModules[tempModuleStoreName] === 'undefined') )) {
                 console.log(\`Worker: Evaluating \${libName} code...\`);
-                module = { exports: {} }; 
+                module = { exports: {} };
                 exports = module.exports;
                 eval(code); // Lib code can use 'module.exports' or 'exports' or attach to 'self/window'
-                
+
                 let assignedExport = null;
                 // Check if library used module.exports or exports directly
                 if ((typeof module.exports === 'object' || typeof module.exports === 'function') && Object.keys(module.exports).length > 0) {
@@ -242,7 +242,7 @@ self.onmessage = async (event) => {
         evalLibrary(estraverseCode, "EStraverse", "estraverse");
         evalLibrary(acornCode, "Acorn", "acorn");
         evalLibrary(escodegenCode, "Escodegen", "escodegen"); // Escodegen, relies on esutils and source-map via mock require
-        
+
         if (!self.acorn || !self.escodegen || !self.estraverse) {
             throw new Error("Worker: One or more AST libraries (Acorn, Escodegen, Estraverse) are not available on self after eval.");
         }
@@ -291,7 +291,7 @@ self.onmessage = async (event) => {
         self.require = originalRequire;
         self.module = originalModule;
         self.exports = originalExports;
-        if (typeof originalWindow === 'undefined' && self.window === self) { delete self.window; } 
+        if (typeof originalWindow === 'undefined' && self.window === self) { delete self.window; }
         else { self.window = originalWindow; }
     }
 };
@@ -363,7 +363,7 @@ self.onmessage = async (event) => {
                     this.progressCallback({ progress: 0, text: 'Initializing JSCodeAnalyzer service...' });
                     const webLLMWorkerScriptPath = WEB_LLM_LIBRARY_SRC.replace('web-llm.js', 'worker.js');
                     const worker = new Worker(webLLMWorkerScriptPath, { type: "module" });
-                    this.chatWorkerClient = new window.webLLM.ChatWorkerClient(worker, { initProgressCallback: report => this.progressCallback(report) });
+                    this.chatWorkerClient = new window.webLLM.ChatWorkerClient(worker, { initProgressCallback: function initProgressCallback(report){ this.progressCallback(report) } });
                     this.progressCallback({ progress: 0.05, text: `Loading model: ${this.modelId}` });
                     await this.chatWorkerClient.reload(this.modelId);
                     this.progressCallback({ progress: 1, text: 'Model loaded and JSCodeAnalyzer ready.' });
@@ -507,14 +507,14 @@ self.onmessage = async (event) => {
                             alert("Tampermonkey header not found. Please include the full script including the header.");
                             return;
                         }
-                        
+
                         processBtn.textContent='Processing...';processBtn.disabled=true;closeBtn.disabled=true;
                         worker.onmessage = (e) => {
                             if(e.data.success){
                                 const modifiedJsIIFE = e.data.modifiedCode;
                                 // The ZLU_INSTRUMENTED_ACTIVE flag is now injected by the worker *inside* the IIFE
                                 const finalScriptToStore = originalHeader + "\n" + modifiedJsIIFE;
-                                
+
                                 localStorage.setItem(INSTRUMENTED_CODE_KEY, finalScriptToStore);
                                 localStorage.setItem(RELOAD_FLAG_KEY,'true');
                                 localStorage.setItem(RELOAD_FLAG_KEY+'_marker','true');
@@ -525,7 +525,7 @@ self.onmessage = async (event) => {
                             else{alert(`Instrumentation Error:\n${e.data.error}\nPage won't reload.`);processBtn.textContent='Process, Store & Reload';processBtn.disabled=false;closeBtn.disabled=false;}
                         };
                         worker.onerror=(err)=>{alert(`Worker Error:\n${err.message}\nPage won't reload.`);processBtn.textContent='Process, Store & Reload';processBtn.disabled=false;closeBtn.disabled=false;};
-                        const functionsToIgnoreList=['trace','getFunc','loadScript','loadWebLLMScript','_initialize','_ensureInitialized','analyze','resetChat','dispose','runAnalyzerDemo','updateProgress','checkForCriticalIssues','renderMermaidDiagram','setupDevInstrumentationUI','initializeApp','getAcornWorkerInstance', 'ensureFetchedLibraryCode', 'fetchScriptAsText'];
+                        const functionsToIgnoreList=['trace','getFunc','loadScript','loadWebLLMScript','ChatWorkerClient','initProgressCallback','_initialize','_ensureInitialized','analyze','resetChat','dispose','runAnalyzerDemo','updateProgress','checkForCriticalIssues','renderMermaidDiagram','setupDevInstrumentationUI','initializeApp','getAcornWorkerInstance','ensureFetchedLibraryCode','fetchScriptAsText'];
                         worker.postMessage({
                             sourceCode: jsCodeToInstrument, // Send only the JS part
                             acornCode: window.ZLU.fetchedLibraryCode.acornCode,
