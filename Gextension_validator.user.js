@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
 // @namespace    http://tampermonkey.net/
-// @version      0.3.5
+// @version      0.3.6
 // @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection (auto-reloads with instrumented code), revert option, and Mermaid flow visualization.
 // @author       ZLudany (enhanced by AI)
 // @match        https://home.google.com/*
@@ -10,12 +10,12 @@
 // @connect      *.mlc.ai              // Official MLC CDNs for models and wasm
 // @connect      cdnjs.cloudflare.com  // For Acorn, Escodegen, ESTraverse
 // @grant        GM_setClipboard       // Optional: For easily copying modified code
-// @date         2023-10-28T14:30:00+00:00
+// @date         2023-10-28T15:00:00+00:00
 // ==/UserScript==
 
 // Top-level scope of the userscript
-const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_5';
-const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_5';
+const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_6';
+const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_6';
 let runOriginalScriptMainIIFE = true;
 
 if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
@@ -150,33 +150,26 @@ self.onmessage = async (event) => {
                             firstStmt.expression.callee.object && firstStmt.expression.callee.object.name === 'ZLU' &&
                             firstStmt.expression.callee.property && firstStmt.expression.callee.property.name === 'trace'
                         ) {
-                            return node; // Already instrumented with ZLU.trace()
+                            return node;
                         }
                     }
-                    // This is an array literal: [{type:'Literal', ...}, {type:'Literal', ...}]
-                    const traceCallArguments = [
-                        { type: 'Literal', value: false, raw: 'false' },
-                        { type: 'Literal', value: true, raw: 'true' }
-                    ];
+                    const traceCallArguments = [{ type: 'Literal', value: false, raw: 'false' }, { type: 'Literal', value: true, raw: 'true' }];
                     const traceCallStatement = {
                         type: 'ExpressionStatement',
                         expression: {
                             type: 'CallExpression',
                             callee: { type: 'MemberExpression', object: {type: 'Identifier', name: 'ZLU'}, property: {type: 'Identifier', name: 'trace'}, computed: false },
-                            arguments: traceCallArguments // Use the well-defined array here
+                            arguments: traceCallArguments
                         }
                     };
-                    // This is an array literal: [traceCallStatement, {type:'ReturnStatement', ...}]
-                    const newBodyContent = [
-                        traceCallStatement,
-                        { type: 'ReturnStatement', argument: node.body }
-                    ];
+                    
                     if (node.body.type === 'BlockStatement') {
                         node.body.body.unshift(traceCallStatement);
                     } else {
+                        const newBodyContent = [traceCallStatement, { type: 'ReturnStatement', argument: node.body }];
                         node.body = {
                             type: 'BlockStatement',
-                            body: newBodyContent // Use the well-defined array here
+                            body: newBodyContent
                         };
                     }
                 }
@@ -214,7 +207,7 @@ self.onmessage = async (event) => {
                 this.chatWorkerClient = null;
                 this.initializationInProgress = false;
                 this.initializationPromise = null;
-                this.progressCallback = progressCallback || function(report){ const p = (report.progress * 100).toFixed(2); console.log(`[JSCodeAnalyzer Progress]: ${report.text} (\${p}%)`); };
+                this.progressCallback = progressCallback || function(report){ const p = (report.progress * 100).toFixed(2); console.log(`[JSCodeAnalyzer Progress]: ${report.text} (${p}%)`); };
                 this.initializationPromise = this._initialize();
             }
             async _initialize(){
@@ -227,13 +220,13 @@ self.onmessage = async (event) => {
                     const webLLMWorkerScriptPath = WEB_LLM_LIBRARY_SRC.replace('web-llm.js', 'worker.js');
                     const worker = new Worker(webLLMWorkerScriptPath, { type: "module" });
                     this.chatWorkerClient = new window.webLLM.ChatWorkerClient(worker, { initProgressCallback: report => this.progressCallback(report) });
-                    this.progressCallback({ progress: 0.05, text: `Loading model: \${this.modelId}` });
+                    this.progressCallback({ progress: 0.05, text: `Loading model: ${this.modelId}` });
                     await this.chatWorkerClient.reload(this.modelId);
                     this.progressCallback({ progress: 1, text: 'Model loaded and JSCodeAnalyzer ready.' });
                     console.log("JSCodeAnalyzer initialized with model:", this.modelId);
                 } catch (error) {
                     console.error("Error initializing JSCodeAnalyzer:", error);
-                    this.progressCallback({ progress: 1, text: `Initialization Error: \${error.message}` });
+                    this.progressCallback({ progress: 1, text: `Initialization Error: ${error.message}` });
                     this.chatWorkerClient = null; throw error;
                 } finally { this.initializationInProgress = false; }
             }
@@ -244,7 +237,7 @@ self.onmessage = async (event) => {
             }
             async analyze(jsCode, analysisTaskPrompt, streamCallback = null){
                 await this._ensureInitialized();
-                const fullPrompt = `You are an expert JavaScript code analysis assistant. Your task is to analyze the provided JavaScript code.\nFollow these instructions for the analysis: \${analysisTaskPrompt}\nProvide a detailed and structured analysis. If you identify any critical security issues or major privacy concerns, please state them clearly and begin those specific points with phrases like "CRITICAL SECURITY ISSUE:" or "MAJOR PRIVACY CONCERN:".\nJavaScript Code:\n\`\`\`javascript\n\${jsCode}\n\`\`\`\nAnalysis:`;
+                const fullPrompt = `You are an expert JavaScript code analysis assistant. Your task is to analyze the provided JavaScript code.\nFollow these instructions for the analysis: ${analysisTaskPrompt}\nProvide a detailed and structured analysis. If you identify any critical security issues or major privacy concerns, please state them clearly and begin those specific points with phrases like "CRITICAL SECURITY ISSUE:" or "MAJOR PRIVACY CONCERN:".\nJavaScript Code:\n\`\`\`javascript\n${jsCode}\n\`\`\`\nAnalysis:`;
                 try {
                     let fullReply = "";
                     if (streamCallback) {
@@ -267,16 +260,16 @@ self.onmessage = async (event) => {
                         this.progressCallback({ progress: 0, text: 'Disposing JSCodeAnalyzer...' });
                         await this.chatWorkerClient.unload(); this.chatWorkerClient.worker.terminate();
                         console.log("JSCodeAnalyzer disposed."); this.progressCallback({ progress: 1, text: 'JSCodeAnalyzer disposed.' });
-                    } catch (error) { console.error("Error during JSCodeAnalyzer disposal:", error); this.progressCallback({ progress: 1, text: `Error disposing: \${error.message}` }); }
+                    } catch (error) { console.error("Error during JSCodeAnalyzer disposal:", error); this.progressCallback({ progress: 1, text: `Error disposing: ${error.message}` }); }
                     this.chatWorkerClient = null;
                 }
                 this.initializationInProgress = false; this.initializationPromise = null;
             }
         }window.ZLU.JSCodeAnalyzer = JSCodeAnalyzer;
 
-        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.5): Running INSTRUMENTED version."); }
-        else { console.log("JSCodeAnalyzer (V0.3.5): Running ORIGINAL version."); }
-        console.log(`Default model for analysis: \${DEFAULT_MODEL_ID}`);
+        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.6): Running INSTRUMENTED version."); }
+        else { console.log("JSCodeAnalyzer (V0.3.6): Running ORIGINAL version."); }
+        console.log(`Default model for analysis: ${DEFAULT_MODEL_ID}`);
 
         async function runAnalyzerDemo(){
             const demoUiContainer = document.createElement('div'); demoUiContainer.id = 'js-analyzer-demo-ui'; demoUiContainer.style.cssText = `position: fixed; bottom: 10px; right: 10px; z-index: 9999; background: #f0f0f0; border: 1px solid #ccc; border-radius: 8px; padding: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); width: 800px; font-family: Arial, sans-serif; font-size: 14px; display: flex; flex-direction: column;`; document.body.appendChild(demoUiContainer);
@@ -285,27 +278,28 @@ self.onmessage = async (event) => {
             const contentArea = document.createElement('div'); contentArea.style.cssText = 'display: flex; flex-direction: row; margin-top: 10px; gap: 10px; flex-grow: 1; max-height: 400px;'; demoUiContainer.appendChild(contentArea);
             const mermaidContainer = document.createElement('div'); mermaidContainer.id = 'analyzer-mermaid-diagram'; mermaidContainer.style.cssText = `flex: 1; border: 1px solid #ddd; background: #fff; padding: 10px; overflow: auto; min-width: 300px;`; contentArea.appendChild(mermaidContainer);
             const analysisResultPre = document.createElement('pre'); analysisResultPre.id = 'analyzer-result-pre'; analysisResultPre.style.cssText = `flex: 2; padding: 10px; border: 1px solid #ddd; background: #fff; max-height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;`; contentArea.appendChild(analysisResultPre);
-            function updateProgress(report){ const span = progressDisplay.querySelector('span'); const bar = progressDisplay.querySelector('div'); if (span) span.textContent = `\${report.text}`; if (bar) { bar.style.width = `\${report.progress * 100}%`; if (report.text.toLowerCase().includes("error")) bar.style.backgroundColor = "red"; else if (report.progress === 1 && !report.text.toLowerCase().includes("error")) bar.style.backgroundColor = "lightgreen"; else bar.style.backgroundColor = "lightblue"; } }
-            function checkForCriticalIssues(llmOutput){ const criticalKeywords=["critical security issue:", "major privacy concern:", "security vulnerability", "privacy violation", "data leak", "exploit", "rce", "xss", "sql injection"]; for (const keyword of criticalKeywords) { if (llmOutput.toLowerCase().includes(keyword.toLowerCase())) return true; } return false; }
+            function updateProgress(report){ const span = progressDisplay.querySelector('span'); const bar = progressDisplay.querySelector('div'); if (span) span.textContent = `${report.text}`; if (bar) { bar.style.width = `${report.progress * 100}%`; if (report.text.toLowerCase().includes("error")) bar.style.backgroundColor = "red"; else if (report.progress === 1 && !report.text.toLowerCase().includes("error")) bar.style.backgroundColor = "lightgreen"; else bar.style.backgroundColor = "lightblue"; } }
+            const criticalKeywordsArray=["critical security issue:", "major privacy concern:", "security vulnerability", "privacy violation", "data leak", "exploit", "rce", "xss", "sql injection"]; // Defined correctly
+            function checkForCriticalIssues(llmOutput){ for (const keyword of criticalKeywordsArray) { if (llmOutput.toLowerCase().includes(keyword.toLowerCase())) return true; } return false; }
             async function renderMermaidDiagram(){
                 if (window.ZLU.executionPaths.size === 0) { mermaidContainer.innerHTML = 'No execution paths recorded. Interact with page if instrumented.'; return; }
                 try {
                     await loadScript(MERMAID_CDN, 'mermaid'); if (!window.mermaid) { mermaidContainer.innerHTML = 'Failed to load Mermaid.'; return; }
                     window.mermaid.initialize({ startOnLoad: false, theme: 'neutral' }); let mermaidDefinition = 'graph TD;\n'; const edges = new Set();
-                    for (const path of window.ZLU.executionPaths) { const nodes = path.split(' -->> '); for (let i = 0; i < nodes.length - 1; i++) { const fromNodeId = nodes[i].replace(/[^a-zA-Z0-9_]/g, '_') + '_' + i; const toNodeId = nodes[i+1].replace(/[^a-zA-Z0-9_]/g, '_') + '_' + (i+1); if (fromNodeId && toNodeId) edges.add(`    \${fromNodeId}[\${JSON.stringify(nodes[i])}] --> \${toNodeId}[\${JSON.stringify(nodes[i+1])}];`); } }
-                    mermaidDefinition += Array.from(edges).join('\n'); if (edges.size === 0 && window.ZLU.executionPaths.size > 0) { const singlePath = Array.from(window.ZLU.executionPaths)[0]; const singleId = singlePath.replace(/[^a-zA-Z0-9_]/g, '_') + '_0'; mermaidDefinition += `    \${singleId}[\${JSON.stringify(singlePath)}];`; }
+                    for (const path of window.ZLU.executionPaths) { const nodes = path.split(' -->> '); for (let i = 0; i < nodes.length - 1; i++) { const fromNodeId = nodes[i].replace(/[^a-zA-Z0-9_]/g, '_') + '_' + i; const toNodeId = nodes[i+1].replace(/[^a-zA-Z0-9_]/g, '_') + '_' + (i+1); if (fromNodeId && toNodeId) edges.add(`    ${fromNodeId}[${JSON.stringify(nodes[i])}] --> ${toNodeId}[${JSON.stringify(nodes[i+1])}];`); } }
+                    mermaidDefinition += Array.from(edges).join('\n'); if (edges.size === 0 && window.ZLU.executionPaths.size > 0) { const singlePath = Array.from(window.ZLU.executionPaths)[0]; const singleId = singlePath.replace(/[^a-zA-Z0-9_]/g, '_') + '_0'; mermaidDefinition += `    ${singleId}[${JSON.stringify(singlePath)}];`; }
                     const { svg } = await window.mermaid.render('mermaid-graph-svg', mermaidDefinition); mermaidContainer.innerHTML = svg;
-                } catch (err) { console.error("Error rendering Mermaid:", err); mermaidContainer.innerHTML = `Error rendering diagram: \${err.message}`; }
+                } catch (err) { console.error("Error rendering Mermaid:", err); mermaidContainer.innerHTML = `Error rendering diagram: ${err.message}`; }
             }
             let analyzerInstance;
             try {
                 analyzerInstance = new window.ZLU.JSCodeAnalyzer(window.ZLU.DEFAULT_JS_ANALYZER_MODEL_ID, updateProgress); await analyzerInstance._ensureInitialized(); updateProgress({ progress: 1, text: 'Analyzer ready.' });
                 const sampleJsCode = `function calculateSum(arr) {\n    let sum = 0;\n    for (let i = 0; i < arr.length; i++) {\n        sum += arr[i];\n    }\n    return sum;\n}\n\nfunction processData(data) {\n    if (!Array.isArray(data)) return "Error: Data is not an array";\n    const result = calculateSum(data);\n    if (typeof result === 'string' && result.includes('<script>')) console.warn("Potential XSS");\n    return result;\n}\nconst data = [1, '2', 3, null, 5, "<script>alert('XSS')</script>"];\nconsole.log(\`Processed: \${processData(data)}\`);`;
                 const analysisTask = "Identify potential bugs, type checking, explain output for 'data' array, highlight security/privacy concerns (vulnerabilities, leaks)."; analysisResultPre.textContent = 'Starting analysis...\n';
-                await analyzerInstance.analyze(sampleJsCode, analysisTask, (type, message) => { if (type === 'delta') analysisResultPre.textContent += message; else if (type === 'finish') { analysisResultPre.textContent += "\n\n--- Analysis Complete ---"; if (checkForCriticalIssues(message)) { demoUiContainer.style.backgroundColor = 'rgba(255,100,100,0.3)'; const titleElement = demoUiContainer.querySelector('h3'); if (titleElement) { titleElement.textContent += " (Critical Issues Found!)"; titleElement.style.color = 'red'; } } } else if (type === 'error') analysisResultPre.textContent += `\n\n--- ERROR: \${message} ---`; });
+                await analyzerInstance.analyze(sampleJsCode, analysisTask, (type, message) => { if (type === 'delta') analysisResultPre.textContent += message; else if (type === 'finish') { analysisResultPre.textContent += "\n\n--- Analysis Complete ---"; if (checkForCriticalIssues(message)) { demoUiContainer.style.backgroundColor = 'rgba(255,100,100,0.3)'; const titleElement = demoUiContainer.querySelector('h3'); if (titleElement) { titleElement.textContent += " (Critical Issues Found!)"; titleElement.style.color = 'red'; } } } else if (type === 'error') analysisResultPre.textContent += `\n\n--- ERROR: ${message} ---`; });
                 if (DEV_MODE && window.ZLU_INSTRUMENTED_ACTIVE === true) { await renderMermaidDiagram(); const refreshButton = document.createElement('button'); refreshButton.textContent = 'Refresh Diagram'; refreshButton.style.cssText='margin-top:5px;padding:5px;font-size:12px;'; refreshButton.onclick = renderMermaidDiagram; const hrElement=document.createElement('hr'); mermaidContainer.appendChild(hrElement); mermaidContainer.appendChild(refreshButton); }
                 else { mermaidContainer.textContent = 'Mermaid diagram active when script is instrumented.'; }
-            } catch (error) { console.error("Analyzer Demo Error:", error); updateProgress({ progress: 1, text: `Demo Error: \${error.message}` }); analysisResultPre.textContent = `Error in demo: \${error.message}`; }
+            } catch (error) { console.error("Analyzer Demo Error:", error); updateProgress({ progress: 1, text: `Demo Error: ${error.message}` }); analysisResultPre.textContent = `Error in demo: ${error.message}`; }
         }
 
         function setupDevInstrumentationUI(){
@@ -325,30 +319,20 @@ self.onmessage = async (event) => {
                 const paragraph=document.createElement('p'); paragraph.innerHTML=`Paste <strong>original userscript source</strong>. It's processed, stored, then page reloads.`; paragraph.style.fontSize='13px'; dialogDiv.appendChild(paragraph);
                 const label=document.createElement('label'); label.textContent='Original Script Source:'; dialogDiv.appendChild(label);
                 const textarea=document.createElement('textarea'); textarea.rows=15; textarea.placeholder="// ==UserScript==..."; textarea.style.width='100%';
-                let prefillHeader = `// ==UserScript==
-// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
-// @version      0.3.5
-// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection (auto-reloads with instrumented code), revert option, and Mermaid flow visualization.
-// @author       ZLudany (enhanced by AI)
-// @match        https://home.google.com/*
-// @connect      cdn.jsdelivr.net
-// @connect      huggingface.co
-// @connect      *.mlc.ai
-// @connect      cdnjs.cloudflare.com
-// @grant        GM_setClipboard
-// @date         2023-10-28T14:30:00+00:00
-// ==/UserScript==`;
+                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.6\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// @connect      cdnjs.cloudflare.com\n// @grant        GM_setClipboard\n// @date         2023-10-28T15:00:00+00:00\n// ==/UserScript==`; // Simplified example
                 let prefillIIFE = '(async function() { /* Paste IIFE body here */ })();';
-                if (document.currentScript && document.currentScript.textContent) {
-                    const currentScriptText = document.currentScript.textContent;
-                    const iifeStartIndex = currentScriptText.indexOf('(async function() {');
-                    const iifeEndIndex = currentScriptText.lastIndexOf('})();');
-                    if (iifeStartIndex !== -1 && iifeEndIndex > iifeStartIndex) {
-                        prefillIIFE = currentScriptText.substring(iifeStartIndex, iifeEndIndex + '})();'.length);
+                try { // Best effort prefill
+                    if (document.currentScript && document.currentScript.textContent) {
+                        const currentScriptText = document.currentScript.textContent;
+                        const headerMatch = currentScriptText.match(/\/\/ ==UserScript==[\s\S]*?\/\/ ==\/UserScript==/s);
+                        if (headerMatch) prefillHeader = headerMatch[0];
+                        const iifeStartIndex = currentScriptText.indexOf('(async function() {');
+                        const iifeEndIndex = currentScriptText.lastIndexOf('})();');
+                        if (iifeStartIndex !== -1 && iifeEndIndex > iifeStartIndex) {
+                            prefillIIFE = currentScriptText.substring(iifeStartIndex, iifeEndIndex + '})();'.length);
+                        }
                     }
-                    const headerMatch = currentScriptText.match(/\/\/ ==UserScript==[\s\S]*?\/\/ ==\/UserScript==/s);
-                    if (headerMatch) prefillHeader = headerMatch[0];
-                }
+                } catch(e) { console.warn("Error during prefill attempt:", e); }
                 textarea.value = prefillHeader + "\n\n" + prefillIIFE;
                 dialogDiv.appendChild(textarea);
                 const processBtn=document.createElement('button'); processBtn.textContent='Process, Store & Reload'; dialogDiv.appendChild(processBtn);
@@ -360,11 +344,11 @@ self.onmessage = async (event) => {
                         processBtn.textContent='Processing...';processBtn.disabled=true;closeBtn.disabled=true;
                         worker.onmessage = (e) => {
                             if(e.data.success){localStorage.setItem(INSTRUMENTED_CODE_KEY,e.data.modifiedCode);localStorage.setItem(RELOAD_FLAG_KEY,'true');localStorage.setItem(RELOAD_FLAG_KEY+'_marker','true');localStorage.setItem(RELOAD_FLAG_KEY+'_just_reloaded_for_instrumentation','true');alert("Code instrumented. Page will reload.");location.reload();}
-                            else{alert(`Instrumentation Error:\n\${e.data.error}\nPage won't reload.`);processBtn.textContent='Process, Store & Reload';processBtn.disabled=false;closeBtn.disabled=false;}
+                            else{alert(`Instrumentation Error:\n${e.data.error}\nPage won't reload.`);processBtn.textContent='Process, Store & Reload';processBtn.disabled=false;closeBtn.disabled=false;}
                         };
-                        worker.onerror=(err)=>{alert(`Worker Error:\n\${err.message}\nPage won't reload.`);processBtn.textContent='Process, Store & Reload';processBtn.disabled=false;closeBtn.disabled=false;};
-                        const functionsToIgnoreArray=['trace','getFunc','loadScript','loadWebLLMScript','_initialize','_ensureInitialized','analyze','resetChat','dispose','runAnalyzerDemo','updateProgress','checkForCriticalIssues','renderMermaidDiagram','setupDevInstrumentationUI','initializeApp','getAcornWorker'];
-                        worker.postMessage({sourceCode:sourceCodeToInstrument,acornPath:ACORN_CDN,escodegenPath:ESCODEGEN_CDN,estraversePath:ESTRAVERSE_CDN,functionsToIgnore:functionsToIgnoreArray});
+                        worker.onerror=(err)=>{alert(`Worker Error:\n${err.message}\nPage won't reload.`);processBtn.textContent='Process, Store & Reload';processBtn.disabled=false;closeBtn.disabled=false;};
+                        const functionsToIgnoreList=['trace','getFunc','loadScript','loadWebLLMScript','_initialize','_ensureInitialized','analyze','resetChat','dispose','runAnalyzerDemo','updateProgress','checkForCriticalIssues','renderMermaidDiagram','setupDevInstrumentationUI','initializeApp','getAcornWorker']; // Correctly defined array
+                        worker.postMessage({sourceCode:sourceCodeToInstrument,acornPath:ACORN_CDN,escodegenPath:ESCODEGEN_CDN,estraversePath:ESTRAVERSE_CDN,functionsToIgnore:functionsToIgnoreList});
                     };
                 } catch(err){console.error("Dev UI setup error:",err);alert("Error loading dev tools: "+err.message);dialogDiv.remove();instrumentBtn.disabled=false;instrumentBtn.textContent=window.ZLU_INSTRUMENTED_ACTIVE===true?'Re-Instrument & Reload':'Instrument & Reload';}
             };
