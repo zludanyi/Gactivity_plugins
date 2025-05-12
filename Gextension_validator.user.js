@@ -1,19 +1,19 @@
 // ==UserScript==
 // @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
 // @namespace    http://tampermonkey.net/
-// @version      0.3.7
+// @version      0.3.8
 // @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection (auto-reloads with instrumented code), revert option, and Mermaid flow visualization.
 // @author       ZLudany (enhanced by AI)
 // @match        https://home.google.com/*
 // @connect      cdn.jsdelivr.net       // For WebLLM library, Mermaid, Acorn, Escodegen, ESTraverse
 // @connect      huggingface.co        // Common CDN for WebLLM models
 // @connect      *.mlc.ai              // Official MLC CDNs for models and wasm
-// @connect      cdnjs.cloudflare.com  // Fallback or other libraries if any were missed. jsDelivr is now primary for AST tools.
+// @connect      cdnjs.cloudflare.com  // Fallback or other libraries
 // ==/UserScript==
 
 // Top-level scope of the userscript
-const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_7';
-const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_7';
+const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_8';
+const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_8';
 let runOriginalScriptMainIIFE = true;
 
 if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
@@ -52,7 +52,6 @@ if (runOriginalScriptMainIIFE) {
         const DEV_MODE = true;
         const WEB_LLM_LIBRARY_SRC = 'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@latest/dist/web-llm.js';
         const DEFAULT_MODEL_ID = "Llama-3-8B-Instruct-q4f16_1";
-        // Switched AST tools to jsDelivr due to reported MIME type issues with cdnjs for worker importScripts
         const ACORN_CDN = 'https://cdn.jsdelivr.net/npm/acorn@8.11.0/dist/acorn.min.js';
         const ESCODEGEN_CDN = 'https://cdn.jsdelivr.net/npm/escodegen@2.1.0/escodegen.min.js';
         const ESTRAVERSE_CDN = 'https://cdn.jsdelivr.net/npm/estraverse@5.3.0/estraverse.min.js';
@@ -189,22 +188,24 @@ self.onmessage = async (event) => {
         }
         self.postMessage({ success: true, modifiedCode: modifiedCode });
     } catch (error) {
-        console.error("Acorn Worker Error:", error);
-        self.postMessage({ success: false, error: error.message + (error.stack ? '\\\\n' + error.stack : '') });
+        console.error("Acorn Worker Error (inside worker onmessage):", error); // Added more specific log
+        self.postMessage({ success: false, error: "Worker script loading/processing error: " + error.message + (error.stack ? '\\\\n' + error.stack : '') });
     }
 };
 `;
         let acornWorker = null;
         async function getAcornWorker(){
             if (!acornWorker) {
-                // Note: These loadScript calls are for the main thread if it needed these libs.
-                // The worker uses importScripts with paths passed to it.
-                // For clarity, if the main thread *doesn't* use Acorn/Escodegen/Estraverse, this Promise.all could be removed.
-                // However, it doesn't hurt functionality beyond a slight initial load, and might be useful if main thread features are added.
-                await Promise.all([ loadScript(ACORN_CDN, 'acorn'), loadScript(ESCODEGEN_CDN, 'escodegen'), loadScript(ESTRAVERSE_CDN, 'estraverse') ]);
-                const blob = new Blob([ACORN_WORKER_SOURCE], { type: 'application/javascript' });
-                const workerUrl = URL.createObjectURL(blob);
-                acornWorker = new Worker(workerUrl);
+                // Removed Promise.all for Acorn/Escodegen/Estraverse here as they are loaded by worker via importScripts.
+                // Main thread does not directly use them.
+                try {
+                    const blob = new Blob([ACORN_WORKER_SOURCE], { type: 'application/javascript' });
+                    const workerUrl = URL.createObjectURL(blob);
+                    acornWorker = new Worker(workerUrl);
+                } catch (e) {
+                    console.error("Error creating Acorn worker blob/URL:", e);
+                    throw e; // Re-throw to be caught by setupDevInstrumentationUI
+                }
             }
             return acornWorker;
         };
@@ -275,8 +276,8 @@ self.onmessage = async (event) => {
         };
         window.ZLU.JSCodeAnalyzer = JSCodeAnalyzer;
 
-        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.7): Running INSTRUMENTED version."); }
-        else { console.log("JSCodeAnalyzer (V0.3.7): Running ORIGINAL version."); }
+        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.8): Running INSTRUMENTED version."); }
+        else { console.log("JSCodeAnalyzer (V0.3.8): Running ORIGINAL version."); }
         console.log(`Default model for analysis: ${DEFAULT_MODEL_ID}`);
 
         async function runAnalyzerDemo(){
@@ -326,7 +327,7 @@ self.onmessage = async (event) => {
                 const paragraph=document.createElement('p'); paragraph.innerHTML=`Paste <strong>original userscript source</strong>. It's processed, stored, then page reloads.`; paragraph.style.fontSize='13px'; dialogDiv.appendChild(paragraph);
                 const label=document.createElement('label'); label.textContent='Original Script Source:'; dialogDiv.appendChild(label);
                 const textarea=document.createElement('textarea'); textarea.rows=15; textarea.placeholder="// ==UserScript==..."; textarea.style.width='100%';
-                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.7\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// @connect      cdnjs.cloudflare.com\n// ==/UserScript==`;
+                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.8\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// @connect      cdnjs.cloudflare.com\n// ==/UserScript==`;
                 let prefillIIFE = '(async function() { /* Paste IIFE body here */ })();';
                 try {
                     if (document.currentScript && document.currentScript.textContent) {
@@ -358,9 +359,9 @@ self.onmessage = async (event) => {
                         worker.postMessage({sourceCode:sourceCodeToInstrument,acornPath:ACORN_CDN,escodegenPath:ESCODEGEN_CDN,estraversePath:ESTRAVERSE_CDN,functionsToIgnore:functionsToIgnoreList});
                     };
                 } catch(err){
-                    console.error("Dev UI setup error:",err);
-                    alert("Error loading dev tools: " + (err && err.message ? err.message : "Unknown error"));
-                    dialogDiv.remove();
+                    console.error("Dev UI setup error (getAcornWorker related):",err);
+                    alert("Error loading dev tools: " + (err && err.message ? err.message : "Unknown error creating worker."));
+                    if (dialogDiv && dialogDiv.parentNode) dialogDiv.remove(); // Ensure dialog is removed on error
                     instrumentBtn.disabled=false;
                     instrumentBtn.textContent=window.ZLU_INSTRUMENTED_ACTIVE===true?'Re-Instrument & Reload':'Instrument & Reload';
                 }
