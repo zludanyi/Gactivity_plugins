@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
 // @namespace    http://tampermonkey.net/
-// @version      0.3.9.2
-// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection. Worker dependencies (Acorn, Escodegen, EStraverse, SourceMap) are pre-fetched by main thread to avoid 'require' errors in worker.
+// @version      0.3.9.3
+// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection. Worker dependencies are pre-fetched by main thread and 'window' is mocked to 'self' for worker eval to avoid 'window not defined' / 'require' errors.
 // @author       ZLudany (enhanced by AI)
 // @match        https://home.google.com/*
 // @connect      cdn.jsdelivr.net       // For WebLLM library, Mermaid, Acorn, Escodegen, ESTraverse, SourceMap
@@ -11,8 +11,8 @@
 // ==/UserScript==
 
 // Top-level scope of the userscript
-const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_2';
-const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_2';
+const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_3';
+const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_3';
 let runOriginalScriptMainIIFE = true;
 
 if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
@@ -142,10 +142,13 @@ if (runOriginalScriptMainIIFE) {
 self.onmessage = async (event) => {
     const { sourceCode, acornCode, escodegenCode, estraverseCode, sourceMapCode, functionsToIgnore } = event.data;
     try {
-        // Eval in specific order to satisfy dependencies
+        // Mock window to self for libraries that expect 'window'
+        const originalWindow = self.window; // Save if it existed (unlikely in worker)
+        self.window = self;
+
         if (sourceMapCode && typeof self.sourceMap === 'undefined') {
             console.log("Worker: Evaluating SourceMap code...");
-            eval(sourceMapCode); // source-map library usually attaches to self.sourceMap
+            eval(sourceMapCode);
             console.log("Worker: SourceMap evaluated. Type: ", typeof self.sourceMap);
             if(typeof self.sourceMap !== 'object' && typeof self.sourceMap !== 'function') {
                  console.warn("Worker: self.sourceMap might not be correctly set by source-map library eval.");
@@ -164,8 +167,8 @@ self.onmessage = async (event) => {
             if(typeof self.acorn !== 'object' && typeof self.acorn !== 'function') throw new Error("Acorn did not attach to self correctly.");
         }
 
-        const originalRequire = self.require; // Save original require if any
-        self.require = function(moduleName) { // Define mock require
+        const originalRequire = self.require;
+        self.require = function(moduleName) {
             console.log("Worker: Mock require called for:", moduleName);
             if (moduleName === 'source-map' && (typeof self.sourceMap === 'object' || typeof self.sourceMap === 'function')) {
                 return self.sourceMap;
@@ -173,7 +176,12 @@ self.onmessage = async (event) => {
             if (moduleName === 'estraverse' && (typeof self.estraverse === 'object' || typeof self.estraverse === 'function')) {
                 return self.estraverse;
             }
-            if (typeof originalRequire === 'function') { // Fallback to original if it existed
+            // You might need to add more specific checks if other modules are required
+            // For example, escodegen sometimes uses require('esutils') or similar
+            if (moduleName.startsWith('./') || moduleName.startsWith('../')) {
+                 console.warn("Worker: Mock require cannot handle relative path:", moduleName);
+            }
+            if (typeof originalRequire === 'function') {
                 return originalRequire.apply(this, arguments);
             }
             console.error("Worker: Mock require cannot resolve module:", moduleName);
@@ -181,12 +189,19 @@ self.onmessage = async (event) => {
         };
 
         if (escodegenCode && typeof self.escodegen === 'undefined') {
-            console.log("Worker: Evaluating Escodegen code (with mock require)...");
+            console.log("Worker: Evaluating Escodegen code (with mock window and require)...");
             eval(escodegenCode);
             console.log("Worker: Escodegen evaluated. Type: ", typeof self.escodegen);
             if(typeof self.escodegen !== 'object' && typeof self.escodegen !== 'function') throw new Error("Escodegen did not attach to self correctly.");
         }
+        
         self.require = originalRequire; // Restore original require
+        if (typeof originalWindow === 'undefined' && self.window === self) { // Clean up our mock if no original window
+             delete self.window;
+        } else {
+             self.window = originalWindow; // Restore original window if it existed
+        }
+
 
         if (!self.acorn || !self.escodegen || !self.estraverse) {
             throw new Error("Worker: One or more AST libraries (Acorn, Escodegen, Estraverse) are not available on self after eval.");
@@ -356,8 +371,8 @@ self.onmessage = async (event) => {
         };
         window.ZLU.JSCodeAnalyzer = JSCodeAnalyzer;
 
-        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9.2): Running INSTRUMENTED version."); }
-        else { console.log("JSCodeAnalyzer (V0.3.9.2): Running ORIGINAL version."); }
+        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9.3): Running INSTRUMENTED version."); }
+        else { console.log("JSCodeAnalyzer (V0.3.9.3): Running ORIGINAL version."); }
         console.log(`Default model for analysis: ${DEFAULT_MODEL_ID}`);
 
         async function runAnalyzerDemo(){
@@ -408,7 +423,7 @@ self.onmessage = async (event) => {
                 const paragraph=document.createElement('p'); paragraph.innerHTML=`Paste <strong>original userscript source</strong>. It's processed, stored, then page reloads.`; paragraph.style.fontSize='13px'; dialogDiv.appendChild(paragraph);
                 const label=document.createElement('label'); label.textContent='Original Script Source:'; dialogDiv.appendChild(label);
                 const textarea=document.createElement('textarea'); textarea.rows=15; textarea.placeholder="// ==UserScript==..."; textarea.style.width='100%';
-                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9.2\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
+                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9.3\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
                 let prefillIIFE = '(async function() { /* Paste IIFE body here */ })();';
                 try {
                     if (document.currentScript && document.currentScript.textContent) {
