@@ -8,7 +8,7 @@
 // @connect      cdn.jsdelivr.net       // For WebLLM library, Mermaid, Acorn, Escodegen, ESTraverse
 // @connect      huggingface.co        // Common CDN for WebLLM models
 // @connect      *.mlc.ai              // Official MLC CDNs for models and wasm
-// @connect      cdnjs.cloudflare.com  // For Acorn, Escodegen, ESTraverse
+// @connect      cdnjs.cloudflare.com  // Fallback or other libraries if any were missed. jsDelivr is now primary for AST tools.
 // ==/UserScript==
 
 // Top-level scope of the userscript
@@ -52,9 +52,10 @@ if (runOriginalScriptMainIIFE) {
         const DEV_MODE = true;
         const WEB_LLM_LIBRARY_SRC = 'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@latest/dist/web-llm.js';
         const DEFAULT_MODEL_ID = "Llama-3-8B-Instruct-q4f16_1";
-        const ACORN_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/acorn/8.11.0/acorn.min.js';
-        const ESCODEGEN_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/escodegen/2.1.0/escodegen.min.js';
-        const ESTRAVERSE_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/estraverse/5.3.0/estraverse.min.js';
+        // Switched AST tools to jsDelivr due to reported MIME type issues with cdnjs for worker importScripts
+        const ACORN_CDN = 'https://cdn.jsdelivr.net/npm/acorn@8.11.0/dist/acorn.min.js';
+        const ESCODEGEN_CDN = 'https://cdn.jsdelivr.net/npm/escodegen@2.1.0/escodegen.min.js';
+        const ESTRAVERSE_CDN = 'https://cdn.jsdelivr.net/npm/estraverse@5.3.0/estraverse.min.js';
         const MERMAID_CDN = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
 
         if (typeof window.ZLU === 'undefined') {
@@ -106,10 +107,10 @@ if (runOriginalScriptMainIIFE) {
                 script.src = url;
                 if (id) script.id = id;
                 script.onload = () => { console.log(`Script ${id || url} loaded successfully from ${url}.`); resolve(); };
-                script.onerror = (event) => { // event is an Event object
+                script.onerror = (event) => {
                     console.error(`Failed to load script ${id || url} from ${url}:`, event);
                     delete loadedScripts[id || url];
-                    reject(new Error(`Failed to load script ${id || url}. See console for details.`)); // Reject with a proper Error object
+                    reject(new Error(`Failed to load script ${id || url}. Type: ${event.type}`));
                 };
                 document.head.appendChild(script);
             });
@@ -196,6 +197,10 @@ self.onmessage = async (event) => {
         let acornWorker = null;
         async function getAcornWorker(){
             if (!acornWorker) {
+                // Note: These loadScript calls are for the main thread if it needed these libs.
+                // The worker uses importScripts with paths passed to it.
+                // For clarity, if the main thread *doesn't* use Acorn/Escodegen/Estraverse, this Promise.all could be removed.
+                // However, it doesn't hurt functionality beyond a slight initial load, and might be useful if main thread features are added.
                 await Promise.all([ loadScript(ACORN_CDN, 'acorn'), loadScript(ESCODEGEN_CDN, 'escodegen'), loadScript(ESTRAVERSE_CDN, 'estraverse') ]);
                 const blob = new Blob([ACORN_WORKER_SOURCE], { type: 'application/javascript' });
                 const workerUrl = URL.createObjectURL(blob);
@@ -354,7 +359,7 @@ self.onmessage = async (event) => {
                     };
                 } catch(err){
                     console.error("Dev UI setup error:",err);
-                    alert("Error loading dev tools: " + (err && err.message ? err.message : "Unknown error")); // More robust error message
+                    alert("Error loading dev tools: " + (err && err.message ? err.message : "Unknown error"));
                     dialogDiv.remove();
                     instrumentBtn.disabled=false;
                     instrumentBtn.textContent=window.ZLU_INSTRUMENTED_ACTIVE===true?'Re-Instrument & Reload':'Instrument & Reload';
