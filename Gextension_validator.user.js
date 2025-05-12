@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
 // @namespace    http://tampermonkey.net/
-// @version      0.3.9.3
-// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection. Worker dependencies are pre-fetched by main thread and 'window' is mocked to 'self' for worker eval to avoid 'window not defined' / 'require' errors.
+// @version      0.3.9.4
+// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection. Worker dependencies (Acorn, Escodegen, EStraverse, SourceMap) are pre-fetched by main thread and 'window', 'module', 'exports' are mocked for worker eval.
 // @author       ZLudany (enhanced by AI)
 // @match        https://home.google.com/*
 // @connect      cdn.jsdelivr.net       // For WebLLM library, Mermaid, Acorn, Escodegen, ESTraverse, SourceMap
@@ -11,8 +11,8 @@
 // ==/UserScript==
 
 // Top-level scope of the userscript
-const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_3';
-const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_3';
+const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_4';
+const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_4';
 let runOriginalScriptMainIIFE = true;
 
 if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
@@ -54,7 +54,7 @@ if (runOriginalScriptMainIIFE) {
         const ACORN_CDN = 'https://cdn.jsdelivr.net/npm/acorn@8.11.0/dist/acorn.min.js';
         const ESCODEGEN_CDN = 'https://cdn.jsdelivr.net/npm/escodegen@2.1.0/escodegen.js';
         const ESTRAVERSE_CDN = 'https://cdn.jsdelivr.net/npm/estraverse@5.3.0/estraverse.js';
-        const SOURCE_MAP_CDN = 'https://cdn.jsdelivr.net/npm/source-map@0.7.4/dist/source-map.min.js';
+        const SOURCE_MAP_CDN = 'https://cdn.jsdelivr.net/npm/source-map@0.7.4/dist/source-map.min.js'; // Often needed by escodegen
         const MERMAID_CDN = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
 
         if (typeof window.ZLU === 'undefined') {
@@ -142,73 +142,61 @@ if (runOriginalScriptMainIIFE) {
 self.onmessage = async (event) => {
     const { sourceCode, acornCode, escodegenCode, estraverseCode, sourceMapCode, functionsToIgnore } = event.data;
     try {
-        // Mock window to self for libraries that expect 'window'
-        const originalWindow = self.window; // Save if it existed (unlikely in worker)
-        self.window = self;
+        const originalWindow = self.window;
+        const originalRequire = self.require;
+        const originalModule = self.module;
+        const originalExports = self.exports;
 
-        if (sourceMapCode && typeof self.sourceMap === 'undefined') {
-            console.log("Worker: Evaluating SourceMap code...");
-            eval(sourceMapCode);
-            console.log("Worker: SourceMap evaluated. Type: ", typeof self.sourceMap);
-            if(typeof self.sourceMap !== 'object' && typeof self.sourceMap !== 'function') {
-                 console.warn("Worker: self.sourceMap might not be correctly set by source-map library eval.");
+        self.window = self; // Mock window
+
+        var module, exports; // Declare for function scope
+
+        // Helper to eval a library and assign its export to self if not already done by the UMD
+        function evalLibrary(code, libName, selfPropertyName) {
+            if (code && typeof self[selfPropertyName] === 'undefined') {
+                console.log(\`Worker: Evaluating \${libName} code...\`);
+                module = { exports: {} }; // Fresh module/exports for each library
+                exports = module.exports;
+                eval(code);
+                if (typeof self[selfPropertyName] === 'undefined' && (typeof module.exports === 'object' || typeof module.exports === 'function') && Object.keys(module.exports).length > 0) {
+                     self[selfPropertyName] = module.exports; // Assign if lib used module.exports
+                }
+                console.log(\`Worker: \${libName} evaluated. Type of self.\${selfPropertyName}: \`, typeof self[selfPropertyName]);
+                if (typeof self[selfPropertyName] !== 'object' && typeof self[selfPropertyName] !== 'function') {
+                     console.warn(\`Worker: self.\${selfPropertyName} might not be correctly set after \${libName} eval.\`);
+                }
             }
         }
-        if (estraverseCode && typeof self.estraverse === 'undefined') {
-            console.log("Worker: Evaluating EStraverse code...");
-            eval(estraverseCode);
-            console.log("Worker: EStraverse evaluated. Type: ", typeof self.estraverse);
-            if(typeof self.estraverse !== 'object' && typeof self.estraverse !== 'function') throw new Error("Estraverse did not attach to self correctly.");
-        }
-        if (acornCode && typeof self.acorn === 'undefined') {
-            console.log("Worker: Evaluating Acorn code...");
-            eval(acornCode);
-            console.log("Worker: Acorn evaluated. Type: ", typeof self.acorn);
-            if(typeof self.acorn !== 'object' && typeof self.acorn !== 'function') throw new Error("Acorn did not attach to self correctly.");
-        }
 
-        const originalRequire = self.require;
+        evalLibrary(sourceMapCode, "SourceMap", "sourceMap");
+        evalLibrary(estraverseCode, "EStraverse", "estraverse");
+        evalLibrary(acornCode, "Acorn", "acorn");
+        
         self.require = function(moduleName) {
             console.log("Worker: Mock require called for:", moduleName);
-            if (moduleName === 'source-map' && (typeof self.sourceMap === 'object' || typeof self.sourceMap === 'function')) {
-                return self.sourceMap;
-            }
-            if (moduleName === 'estraverse' && (typeof self.estraverse === 'object' || typeof self.estraverse === 'function')) {
-                return self.estraverse;
-            }
-            // You might need to add more specific checks if other modules are required
-            // For example, escodegen sometimes uses require('esutils') or similar
-            if (moduleName.startsWith('./') || moduleName.startsWith('../')) {
-                 console.warn("Worker: Mock require cannot handle relative path:", moduleName);
-            }
-            if (typeof originalRequire === 'function') {
-                return originalRequire.apply(this, arguments);
-            }
+            if (moduleName === 'source-map' && (typeof self.sourceMap === 'object' || typeof self.sourceMap === 'function')) return self.sourceMap;
+            if (moduleName === 'estraverse' && (typeof self.estraverse === 'object' || typeof self.estraverse === 'function')) return self.estraverse;
+            // Add more mappings here if other modules are commonly required by escodegen/etc.
+            // e.g. if (moduleName === 'esutils' && self.esutils) return self.esutils;
+            if (typeof originalRequire === 'function') return originalRequire.apply(this, arguments);
             console.error("Worker: Mock require cannot resolve module:", moduleName);
             throw new Error("Worker: Mock require cannot resolve module: " + moduleName);
         };
-
-        if (escodegenCode && typeof self.escodegen === 'undefined') {
-            console.log("Worker: Evaluating Escodegen code (with mock window and require)...");
-            eval(escodegenCode);
-            console.log("Worker: Escodegen evaluated. Type: ", typeof self.escodegen);
-            if(typeof self.escodegen !== 'object' && typeof self.escodegen !== 'function') throw new Error("Escodegen did not attach to self correctly.");
-        }
         
-        self.require = originalRequire; // Restore original require
-        if (typeof originalWindow === 'undefined' && self.window === self) { // Clean up our mock if no original window
-             delete self.window;
-        } else {
-             self.window = originalWindow; // Restore original window if it existed
-        }
+        evalLibrary(escodegenCode, "Escodegen", "escodegen");
 
+        // Restore original environment
+        self.require = originalRequire;
+        self.module = originalModule;
+        self.exports = originalExports;
+        if (typeof originalWindow === 'undefined' && self.window === self) { delete self.window; }
+        else { self.window = originalWindow; }
 
         if (!self.acorn || !self.escodegen || !self.estraverse) {
             throw new Error("Worker: One or more AST libraries (Acorn, Escodegen, Estraverse) are not available on self after eval.");
         }
 
         const ast = self.acorn.parse(sourceCode, { ecmaVersion: 'latest', sourceType: 'script', locations: false });
-
         self.estraverse.replace(ast, {
             enter: function (node) {
                 if (node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression') {
@@ -217,31 +205,17 @@ self.onmessage = async (event) => {
                     else if (node.parent && node.parent.type === 'VariableDeclarator' && node.parent.id.name) { functionName = node.parent.id.name; }
                     else if (node.parent && node.parent.type === 'MethodDefinition' && node.parent.key.name) { functionName = node.parent.key.name; }
                     else if (node.parent && node.parent.type === 'Property' && node.parent.key.name) { functionName = node.parent.key.name; }
-
                     if (functionsToIgnore && functionsToIgnore.includes(functionName)) { return node; }
                     if (node.body && node.body.type === 'BlockStatement' && node.body.body && node.body.body.length > 0) {
                         const firstStmt = node.body.body[0];
                         if (firstStmt.type === 'ExpressionStatement' && firstStmt.expression.type === 'CallExpression' &&
                             firstStmt.expression.callee.object && firstStmt.expression.callee.object.name === 'ZLU' &&
-                            firstStmt.expression.callee.property && firstStmt.expression.callee.property.name === 'trace') {
-                            return node;
-                        }
+                            firstStmt.expression.callee.property && firstStmt.expression.callee.property.name === 'trace') { return node; }
                     }
                     const traceCallArguments = [{ type: 'Literal', value: false, raw: 'false' }, { type: 'Literal', value: true, raw: 'true' }];
-                    const traceCallStatement = {
-                        type: 'ExpressionStatement',
-                        expression: {
-                            type: 'CallExpression',
-                            callee: { type: 'MemberExpression', object: {type: 'Identifier', name: 'ZLU'}, property: {type: 'Identifier', name: 'trace'}, computed: false },
-                            arguments: traceCallArguments
-                        }
-                    };
-                    if (node.body.type === 'BlockStatement') {
-                        node.body.body.unshift(traceCallStatement);
-                    } else {
-                        const newBodyContent = [traceCallStatement, { type: 'ReturnStatement', argument: node.body }];
-                        node.body = { type: 'BlockStatement', body: newBodyContent };
-                    }
+                    const traceCallStatement = { type: 'ExpressionStatement', expression: { type: 'CallExpression', callee: { type: 'MemberExpression', object: {type: 'Identifier', name: 'ZLU'}, property: {type: 'Identifier', name: 'trace'}, computed: false }, arguments: traceCallArguments } };
+                    if (node.body.type === 'BlockStatement') { node.body.body.unshift(traceCallStatement); }
+                    else { const newBodyContent = [traceCallStatement, { type: 'ReturnStatement', argument: node.body }]; node.body = { type: 'BlockStatement', body: newBodyContent }; }
                 }
                 return node;
             }
@@ -371,8 +345,8 @@ self.onmessage = async (event) => {
         };
         window.ZLU.JSCodeAnalyzer = JSCodeAnalyzer;
 
-        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9.3): Running INSTRUMENTED version."); }
-        else { console.log("JSCodeAnalyzer (V0.3.9.3): Running ORIGINAL version."); }
+        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9.4): Running INSTRUMENTED version."); }
+        else { console.log("JSCodeAnalyzer (V0.3.9.4): Running ORIGINAL version."); }
         console.log(`Default model for analysis: ${DEFAULT_MODEL_ID}`);
 
         async function runAnalyzerDemo(){
@@ -423,7 +397,7 @@ self.onmessage = async (event) => {
                 const paragraph=document.createElement('p'); paragraph.innerHTML=`Paste <strong>original userscript source</strong>. It's processed, stored, then page reloads.`; paragraph.style.fontSize='13px'; dialogDiv.appendChild(paragraph);
                 const label=document.createElement('label'); label.textContent='Original Script Source:'; dialogDiv.appendChild(label);
                 const textarea=document.createElement('textarea'); textarea.rows=15; textarea.placeholder="// ==UserScript==..."; textarea.style.width='100%';
-                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9.3\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
+                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9.4\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
                 let prefillIIFE = '(async function() { /* Paste IIFE body here */ })();';
                 try {
                     if (document.currentScript && document.currentScript.textContent) {
