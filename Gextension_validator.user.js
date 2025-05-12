@@ -1,18 +1,18 @@
 // ==UserScript==
 // @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
 // @namespace    http://tampermonkey.net/
-// @version      0.3.9.7
-// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection. Worker dependencies are pre-fetched by main thread and 'window', 'module', 'exports', 'require' (including 'fs', 'path') are mocked for worker eval.
+// @version      0.3.9.8
+// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection. Worker dependencies (Acorn, Escodegen, EStraverse, SourceMap, ESUtils) are pre-fetched and environment mocked for worker eval.
 // @author       ZLudany (enhanced by AI)
 // @match        https://home.google.com/*
-// @connect      cdn.jsdelivr.net       // For WebLLM library, Mermaid, Acorn, Escodegen, ESTraverse, SourceMap
+// @connect      cdn.jsdelivr.net       // For WebLLM library, Mermaid, Acorn, Escodegen, ESTraverse, SourceMap, ESUtils
 // @connect      huggingface.co        // Common CDN for WebLLM models
 // @connect      *.mlc.ai              // Official MLC CDNs for models and wasm
 // ==/UserScript==
 
 // Top-level scope of the userscript
-const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_7';
-const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_7';
+const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_8';
+const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_8';
 let runOriginalScriptMainIIFE = true;
 
 if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
@@ -55,6 +55,7 @@ if (runOriginalScriptMainIIFE) {
         const ESCODEGEN_CDN = 'https://cdn.jsdelivr.net/npm/escodegen@2.1.0/escodegen.js';
         const ESTRAVERSE_CDN = 'https://cdn.jsdelivr.net/npm/estraverse@5.3.0/estraverse.js';
         const SOURCE_MAP_CDN = 'https://cdn.jsdelivr.net/npm/source-map@0.7.4/dist/source-map.min.js';
+        const ESUTILS_CDN = 'https://cdn.jsdelivr.net/npm/esutils@2.0.3/lib/esutils.js'; // Using .js for potentially better UMD
         const MERMAID_CDN = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
 
         if (typeof window.ZLU === 'undefined') {
@@ -140,7 +141,7 @@ if (runOriginalScriptMainIIFE) {
         };
         const ACORN_WORKER_SOURCE = `
 self.onmessage = async (event) => {
-    const { sourceCode, acornCode, escodegenCode, estraverseCode, sourceMapCode, functionsToIgnore } = event.data;
+    const { sourceCode, acornCode, escodegenCode, estraverseCode, sourceMapCode, esutilsCode, functionsToIgnore } = event.data;
     
     const originalWindow = self.window;
     const originalRequire = self.require;
@@ -152,16 +153,11 @@ self.onmessage = async (event) => {
 
         self.require = function(moduleName) {
             console.log("Worker: Mock require called for:", moduleName);
-            if (moduleName === 'fs') {
-                console.warn("Worker: Mocked 'fs' module requested. Returning empty object.");
-                return {};
-            }
-            if (moduleName === 'path') {
-                console.warn("Worker: Mocked 'path' module requested. Returning empty object.");
-                return {}; // Often, just providing an empty object is enough
-            }
+            if (moduleName === 'fs') { console.warn("Worker: Mocked 'fs' module requested. Returning empty object."); return {}; }
+            if (moduleName === 'path') { console.warn("Worker: Mocked 'path' module requested. Returning empty object."); return {}; }
             if (moduleName === 'source-map' && (typeof self.sourceMap === 'object' || typeof self.sourceMap === 'function')) return self.sourceMap;
             if (moduleName === 'estraverse' && (typeof self.estraverse === 'object' || typeof self.estraverse === 'function')) return self.estraverse;
+            if (moduleName === 'esutils' && (typeof self.esutils === 'object' || typeof self.esutils === 'function')) return self.esutils;
             
             if (typeof originalRequire === 'function') {
                 return originalRequire.apply(this, arguments);
@@ -183,12 +179,13 @@ self.onmessage = async (event) => {
                 }
                 console.log(\`Worker: \${libName} evaluated. Type of self.\${selfPropertyName}: \`, typeof self[selfPropertyName]);
                 if (typeof self[selfPropertyName] !== 'object' && typeof self[selfPropertyName] !== 'function') {
-                     console.warn(\`Worker: self.\${selfPropertyName} might not be correctly set after \${libName} eval.\`);
+                     console.warn(\`Worker: self.\${selfPropertyName} might not be correctly set after \${libName} eval for '\${libName}'.\`);
                 }
             }
         }
 
         evalLibrary(sourceMapCode, "SourceMap", "sourceMap");
+        evalLibrary(esutilsCode, "ESUtils", "esutils"); // Eval esutils before others that might need it
         evalLibrary(estraverseCode, "EStraverse", "estraverse");
         evalLibrary(acornCode, "Acorn", "acorn");
         evalLibrary(escodegenCode, "Escodegen", "escodegen");
@@ -247,13 +244,14 @@ self.onmessage = async (event) => {
             if (!window.ZLU.fetchedLibraryCode) {
                 console.log("Pre-fetching AST libraries for worker...");
                 try {
-                    const [acornCode, escodegenCode, estraverseCode, sourceMapCode] = await Promise.all([
+                    const [acornCode, escodegenCode, estraverseCode, sourceMapCode, esutilsCode] = await Promise.all([
                         fetchScriptAsText(ACORN_CDN, "Acorn"),
                         fetchScriptAsText(ESCODEGEN_CDN, "Escodegen"),
                         fetchScriptAsText(ESTRAVERSE_CDN, "Estraverse"),
-                        fetchScriptAsText(SOURCE_MAP_CDN, "SourceMap")
+                        fetchScriptAsText(SOURCE_MAP_CDN, "SourceMap"),
+                        fetchScriptAsText(ESUTILS_CDN, "ESUtils")
                     ]);
-                    window.ZLU.fetchedLibraryCode = { acornCode, escodegenCode, estraverseCode, sourceMapCode };
+                    window.ZLU.fetchedLibraryCode = { acornCode, escodegenCode, estraverseCode, sourceMapCode, esutilsCode };
                     console.log("AST libraries pre-fetched successfully.");
                 } catch (error) {
                     console.error("Failed to pre-fetch one or more AST libraries for worker:", error);
@@ -263,7 +261,7 @@ self.onmessage = async (event) => {
             }
             if (!window.ZLU.fetchedLibraryCode || !window.ZLU.fetchedLibraryCode.acornCode?.trim() ||
                 !window.ZLU.fetchedLibraryCode.escodegenCode?.trim() || !window.ZLU.fetchedLibraryCode.estraverseCode?.trim() ||
-                !window.ZLU.fetchedLibraryCode.sourceMapCode?.trim()
+                !window.ZLU.fetchedLibraryCode.sourceMapCode?.trim() || !window.ZLU.fetchedLibraryCode.esutilsCode?.trim()
             ) {
                 console.error("One or more fetched AST library codes are empty.", window.ZLU.fetchedLibraryCode);
                 window.ZLU.fetchedLibraryCode = null;
@@ -353,8 +351,8 @@ self.onmessage = async (event) => {
         };
         window.ZLU.JSCodeAnalyzer = JSCodeAnalyzer;
 
-        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9.7): Running INSTRUMENTED version."); }
-        else { console.log("JSCodeAnalyzer (V0.3.9.7): Running ORIGINAL version."); }
+        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9.8): Running INSTRUMENTED version."); }
+        else { console.log("JSCodeAnalyzer (V0.3.9.8): Running ORIGINAL version."); }
         console.log(`Default model for analysis: ${DEFAULT_MODEL_ID}`);
 
         async function runAnalyzerDemo(){
@@ -405,7 +403,7 @@ self.onmessage = async (event) => {
                 const paragraph=document.createElement('p'); paragraph.innerHTML=`Paste <strong>original userscript source</strong>. It's processed, stored, then page reloads.`; paragraph.style.fontSize='13px'; dialogDiv.appendChild(paragraph);
                 const label=document.createElement('label'); label.textContent='Original Script Source:'; dialogDiv.appendChild(label);
                 const textarea=document.createElement('textarea'); textarea.rows=15; textarea.placeholder="// ==UserScript==..."; textarea.style.width='100%';
-                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9.7\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
+                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9.8\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
                 let prefillIIFE = '(async function() { /* Paste IIFE body here */ })();';
                 try {
                     if (document.currentScript && document.currentScript.textContent) {
@@ -444,6 +442,7 @@ self.onmessage = async (event) => {
                             escodegenCode: window.ZLU.fetchedLibraryCode.escodegenCode,
                             estraverseCode: window.ZLU.fetchedLibraryCode.estraverseCode,
                             sourceMapCode: window.ZLU.fetchedLibraryCode.sourceMapCode,
+                            esutilsCode: window.ZLU.fetchedLibraryCode.esutilsCode,
                             functionsToIgnore:functionsToIgnoreList
                         });
                     };
