@@ -15,6 +15,41 @@ const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_12';
 const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_12';
 let runOriginalScriptMainIIFE = true;
 
+function getFunc(f){
+    if (typeof f !== 'function') { return null; }
+    return f.name ? f.name : (f.toString().match(/(function)(\s+)(\w+)(\()/)?.[3] || 'anonymous');
+};
+window.ZLU.getFunc = getFunc;
+
+function trace(logBefore = false, all = true){
+    try {
+        const maxDepth = 20;
+        let currentFunc = logBefore ? arguments.callee.caller.caller : arguments.callee.caller;
+        if (!currentFunc) { return null; }
+        const callChain = [];
+        let depth = 0;
+        while (currentFunc && depth < maxDepth) {
+            const funcName = getFunc(currentFunc);
+            if (funcName) { callChain.push(funcName); }
+            if (currentFunc.caller === currentFunc) { callChain.push("recursive_self"); break; }
+            if (!all && callChain.length > 1) {
+                const prevFuncs = callChain.slice(0, -1).join(' -->> ');
+                if (prevFuncs.includes(funcName)) { break; }
+            }
+            currentFunc = currentFunc.caller;
+            depth++;
+        }
+        if (depth === maxDepth) callChain.push("max_depth_reached");
+        if (callChain.length > 0) {
+            const pathString = callChain.reverse().join(' -->> ');
+            window.ZLU.executionPaths.add(pathString);
+            return pathString;
+        }
+    } catch (e) { /* console.warn("Error in trace function:", e); */ }
+    return null;
+};
+window.ZLU.trace = trace;
+
 if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
     const fullInstrumentedScript = localStorage.getItem(INSTRUMENTED_CODE_KEY);
     localStorage.removeItem(RELOAD_FLAG_KEY); // Clear main flag early
@@ -33,6 +68,7 @@ if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
         }
 
         try {
+            //alert(codeToExecute);
             new Function(codeToExecute)(); // Execute only the code part
             if (window.ZLU_INSTRUMENTED_ACTIVE === true) {
                 console.log("JavaScript Code Analyzer: Instrumented code has set its flag. Halting original script's main IIFE execution.");
@@ -46,7 +82,7 @@ if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
             console.error("JavaScript Code Analyzer: Error executing instrumented code (after potential header strip):", e);
             alert("Error executing instrumented code. Check console. Original script will load. Instrumented code and related flags will be cleared.");
             delete window.ZLU_INSTRUMENTED_ACTIVE;
-            localStorage.removeItem(INSTRUMENTED_CODE_KEY);
+            //localStorage.removeItem(INSTRUMENTED_CODE_KEY);
         }
     } else {
         console.log("JavaScript Code Analyzer: Reload flag was set, but no instrumented code found. Original script will run.");
@@ -79,41 +115,6 @@ if (runOriginalScriptMainIIFE) {
         window.ZLU.executionPaths = window.ZLU.executionPaths || new Set();
         window.ZLU.DEFAULT_JS_ANALYZER_MODEL_ID = DEFAULT_MODEL_ID;
         window.ZLU.fetchedLibraryCode = null;
-
-        function getFunc(f){
-            if (typeof f !== 'function') { return null; }
-            return f.name ? f.name : (f.toString().match(/(function)(\s+)(\w+)(\()/)?.[3] || 'anonymous');
-        };
-        window.ZLU.getFunc = getFunc;
-
-        function trace(logBefore = false, all = true){
-            try {
-                const maxDepth = 20;
-                let currentFunc = logBefore ? arguments.callee.caller.caller : arguments.callee.caller;
-                if (!currentFunc) { return null; }
-                const callChain = [];
-                let depth = 0;
-                while (currentFunc && depth < maxDepth) {
-                    const funcName = getFunc(currentFunc);
-                    if (funcName) { callChain.push(funcName); }
-                    if (currentFunc.caller === currentFunc) { callChain.push("recursive_self"); break; }
-                    if (!all && callChain.length > 1) {
-                        const prevFuncs = callChain.slice(0, -1).join(' -->> ');
-                        if (prevFuncs.includes(funcName)) { break; }
-                    }
-                    currentFunc = currentFunc.caller;
-                    depth++;
-                }
-                if (depth === maxDepth) callChain.push("max_depth_reached");
-                if (callChain.length > 0) {
-                    const pathString = callChain.reverse().join(' -->> ');
-                    window.ZLU.executionPaths.add(pathString);
-                    return pathString;
-                }
-            } catch (e) { /* console.warn("Error in trace function:", e); */ }
-            return null;
-        };
-        window.ZLU.trace = trace;
 
         const loadedScripts = {};
         async function loadScript(url, id){
@@ -507,14 +508,6 @@ self.onmessage = async (event) => {
                             return;
                         }
                         
-                        // Ensure jsCodeToInstrument is just the IIFE or the code to be instrumented
-                        if (!jsCodeToInstrument.startsWith('(async function() {')) {
-                            // This is a basic check; more robust parsing might be needed if script structures vary a lot
-                            alert("Could not properly isolate the JavaScript IIFE from the provided source. Please ensure it's formatted correctly after the header.");
-                            return;
-                        }
-
-
                         processBtn.textContent='Processing...';processBtn.disabled=true;closeBtn.disabled=true;
                         worker.onmessage = (e) => {
                             if(e.data.success){
