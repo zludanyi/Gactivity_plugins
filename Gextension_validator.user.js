@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
 // @namespace    http://tampermonkey.net/
-// @version      0.3.1
-// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection (auto-reloads with instrumented code) and Mermaid flow visualization.
+// @version      0.3.2
+// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection (auto-reloads with instrumented code), revert option, and Mermaid flow visualization.
 // @author       ZLudany (enhanced by AI)
 // @match        https://home.google.com/*
 // @connect      cdn.jsdelivr.net       // For WebLLM library, Mermaid, Acorn, Escodegen, ESTraverse
@@ -10,27 +10,48 @@
 // @connect      *.mlc.ai              // Official MLC CDNs for models and wasm
 // @connect      cdnjs.cloudflare.com  // For Acorn, Escodegen, ESTraverse
 // @grant        GM_setClipboard       // Optional: For easily copying modified code
-// @date         2023-10-28T12:30:00+00:00
+// @date         2023-10-28T13:00:00+00:00
 // ==/UserScript==
 
 (async function() {
     'use strict';
-    const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_1';
-    const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_1';
+    const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_2';
+    const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_2';
 
     if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
         const instrumentedCode = localStorage.getItem(INSTRUMENTED_CODE_KEY);
+        // Clear flags *before* attempting to run, so a faulty script doesn't cause a reload loop
         localStorage.removeItem(RELOAD_FLAG_KEY);
-        localStorage.removeItem(INSTRUMENTED_CODE_KEY);
+        // Keep INSTRUMENTED_CODE_KEY for now, new Function() might fail.
+        // If it fails, ZLU_INSTRUMENTED_ACTIVE won't be set, and original script path will be taken.
+
         if (instrumentedCode) {
             console.log("JavaScript Code Analyzer: Loading instrumented code from localStorage...");
             try {
+                // The instrumentedCode is expected to set window.ZLU_INSTRUMENTED_ACTIVE = true;
                 new Function(instrumentedCode)();
-                return;
+                // If new Function() succeeds and contains "return;", the original script's execution stops here.
+                // If it doesn't contain "return;" or if it's not an IIFE, this original script's outer function might continue.
+                // The `return;` inside the instrumented IIFE is crucial if it's wrapping the whole script.
+                // For safety, explicitly return from this outer IIFE if instrumented code likely took over.
+                if (window.ZLU_INSTRUMENTED_ACTIVE) {
+                    return; // Stop execution of this original script instance
+                }
             } catch (e) {
                 console.error("JavaScript Code Analyzer: Error executing instrumented code:", e);
-                alert("Error executing instrumented code. Check console. The original script will load on the next refresh. The instrumented code will be discarded.");
+                alert("Error executing instrumented code. Check console. The original script will load. Instrumented code and flags will be cleared.");
+                delete window.ZLU_INSTRUMENTED_ACTIVE; // Ensure it's not set if exec failed
+                localStorage.removeItem(INSTRUMENTED_CODE_KEY); // Clear faulty code
+                localStorage.removeItem(RELOAD_FLAG_KEY + '_marker');
+                localStorage.removeItem(RELOAD_FLAG_KEY + '_just_reloaded_for_instrumentation');
+                // Allow original script to continue below
             }
+        } else {
+             // Flags were set, but no code, clear them all
+            delete window.ZLU_INSTRUMENTED_ACTIVE;
+            localStorage.removeItem(INSTRUMENTED_CODE_KEY);
+            localStorage.removeItem(RELOAD_FLAG_KEY + '_marker');
+            localStorage.removeItem(RELOAD_FLAG_KEY + '_just_reloaded_for_instrumentation');
         }
     }
 
@@ -167,7 +188,8 @@
                                 if (firstStmt.type === 'ExpressionStatement' &&
                                     firstStmt.expression.type === 'CallExpression' &&
                                     firstStmt.expression.callee.type === 'Identifier' &&
-                                    firstStmt.expression.callee.name === 'trace') {
+                                    (firstStmt.expression.callee.name === 'trace' || (firstStmt.expression.callee.object && firstStmt.expression.callee.object.name === 'ZLU' && firstStmt.expression.callee.property.name === 'trace'))
+                                ) {
                                     return node;
                                 }
                             }
@@ -176,7 +198,7 @@
                                 type: 'ExpressionStatement',
                                 expression: {
                                     type: 'CallExpression',
-                                    callee: { type: 'Identifier', name: 'trace' },
+                                    callee: { type: 'Identifier', name: 'ZLU.trace' }, // Call namespaced trace
                                     arguments: [
                                         { type: 'Literal', value: false, raw: 'false' },
                                         { type: 'Literal', value: true, raw: 'true' }
@@ -201,7 +223,15 @@
                 });
 
                 const modifiedCode = self.escodegen.generate(ast);
-                self.postMessage({ success: true, modifiedCode });
+                // Ensure the IIFE return pattern if the original script uses it to stop execution
+                let finalCode = modifiedCode;
+                const iifeRegex = /^\\s*\\(\\s*async\\s+function\\s*\\(\\s*\\)\\s*{\\s*['"]use strict['"];/m;
+                if (iifeRegex.test(sourceCode) && !modifiedCode.endsWith('\\nreturn;\\n})();')) {
+                     // A bit simplistic, assumes the main IIFE is the one to add `return;` to.
+                     // This is to ensure the original script instance stops if the instrumented one starts.
+                     finalCode = finalCode.replace(/(\\n\\}\\)\\(\\);)$/, '\nreturn;\n})();');
+                }
+                self.postMessage({ success: true, modifiedCode: finalCode });
 
             } catch (error) {
                 console.error("Acorn Worker Error:", error);
@@ -342,11 +372,18 @@ Analysis:`;
     }window.ZLU.JSCodeAnalyzer = JSCodeAnalyzer;
 
 
-    console.log("JSCodeAnalyzer class (V0.3.1) loaded. Access with `new ZLU.JSCodeAnalyzer()`.");
-    console.log(`Default model for analysis: ${DEFAULT_MODEL_ID}`);
-    if (localStorage.getItem(RELOAD_FLAG_KEY + '_marker')) {
+    console.log(`JSCodeAnalyzer class (V0.3.2) loaded. Default model: ${DEFAULT_MODEL_ID}`);
+    if (window.ZLU_INSTRUMENTED_ACTIVE === true) {
         console.log("JSCodeAnalyzer: Running instrumented version.");
-        localStorage.removeItem(RELOAD_FLAG_KEY + '_marker');
+        // Clean up temporary marker if it exists from a previous reload cycle.
+        if (localStorage.getItem(RELOAD_FLAG_KEY + '_marker')) {
+            localStorage.removeItem(RELOAD_FLAG_KEY + '_marker');
+        }
+        if (localStorage.getItem(RELOAD_FLAG_KEY + '_just_reloaded_for_instrumentation')) {
+             localStorage.removeItem(RELOAD_FLAG_KEY + '_just_reloaded_for_instrumentation');
+        }
+    } else {
+        console.log("JSCodeAnalyzer: Running original version.");
     }
 
 
@@ -364,10 +401,9 @@ Analysis:`;
 
         const title = document.createElement('h3');
         title.textContent = 'JS Code Analyzer Demo';
-        if (localStorage.getItem(RELOAD_FLAG_KEY + '_just_reloaded_for_instrumentation')) {
+        if (window.ZLU_INSTRUMENTED_ACTIVE === true) {
             title.textContent += ' (Instrumented)';
             title.style.color = 'purple';
-            localStorage.removeItem(RELOAD_FLAG_KEY + '_just_reloaded_for_instrumentation');
         }
         title.style.marginTop = '0';
         demoUiContainer.appendChild(title);
@@ -522,7 +558,7 @@ console.log(\`Processed: \${processData(data)}\`);
                 }
             });
 
-            if (DEV_MODE) {
+            if (DEV_MODE && window.ZLU_INSTRUMENTED_ACTIVE === true) { // Only show refresh if instrumented
                 await renderMermaidDiagram();
                 const refreshDiagramButton = document.createElement('button');
                 refreshDiagramButton.textContent = 'Refresh Diagram from Traces';
@@ -531,6 +567,8 @@ console.log(\`Processed: \${processData(data)}\`);
                 const hr = document.createElement('hr');
                 mermaidContainer.appendChild(hr);
                 mermaidContainer.appendChild(refreshDiagramButton);
+            } else {
+                 mermaidContainer.textContent = 'Mermaid diagram active when script is instrumented.';
             }
 
 
@@ -545,19 +583,62 @@ console.log(\`Processed: \${processData(data)}\`);
 
     // --- DEV_MODE: Script Instrumentation UI ---
     function setupDevInstrumentationUI(){
-        const devButton = document.createElement('button');
-        devButton.textContent = 'Instrument & Reload Script';
-        devButton.title = 'Modifies the current userscript with trace calls and reloads the page.';
-        devButton.style.cssText = `
+        const devPanel = document.createElement('div');
+        devPanel.style.cssText = `
             position: fixed; top: 50px; right: 10px; z-index: 10001;
+            background: #e9ecef; padding: 10px; border-radius: 5px;
+            border: 1px solid #ced4da; display: flex; flex-direction: column; gap: 8px;
+        `;
+
+        const statusText = document.createElement('div');
+        statusText.style.fontSize = '12px';
+        statusText.style.fontWeight = 'bold';
+        devPanel.appendChild(statusText);
+
+
+        if (window.ZLU_INSTRUMENTED_ACTIVE === true) {
+            statusText.textContent = 'Status: Running instrumented version.';
+            statusText.style.color = 'purple';
+
+            const revertButton = document.createElement('button');
+            revertButton.textContent = 'Revert to Original & Reload';
+            revertButton.title = 'Removes instrumentation and reloads the page with the original script.';
+            revertButton.style.cssText = `
+                padding: 8px 12px; background-color: #28a745; color: white;
+                border: none; border-radius: 5px; cursor: pointer; font-size: 12px;
+            `;
+            revertButton.onclick = () => {
+                revertButton.disabled = true;
+                revertButton.textContent = 'Reverting...';
+                delete window.ZLU_INSTRUMENTED_ACTIVE;
+                localStorage.removeItem(INSTRUMENTED_CODE_KEY);
+                localStorage.removeItem(RELOAD_FLAG_KEY);
+                localStorage.removeItem(RELOAD_FLAG_KEY + '_marker');
+                localStorage.removeItem(RELOAD_FLAG_KEY + '_just_reloaded_for_instrumentation');
+                alert("Reverting to original script. Page will now reload.");
+                location.reload();
+            };
+            devPanel.appendChild(revertButton);
+        } else {
+            statusText.textContent = 'Status: Running original version.';
+            statusText.style.color = 'green';
+        }
+
+        // Always show Instrument button (text might change if already instrumented)
+        const instrumentButton = document.createElement('button');
+        instrumentButton.textContent = window.ZLU_INSTRUMENTED_ACTIVE === true ? 'Re-Instrument & Reload Script' : 'Instrument & Reload Script';
+        instrumentButton.title = 'Modifies the current userscript with trace calls and reloads the page.';
+        instrumentButton.style.cssText = `
             padding: 8px 12px; background-color: #ffc107; color: black;
             border: none; border-radius: 5px; cursor: pointer; font-size: 12px;
         `;
-        document.body.appendChild(devButton);
+        devPanel.appendChild(instrumentButton);
+        document.body.appendChild(devPanel);
 
-        devButton.onclick = async () => {
-            devButton.disabled = true;
-            devButton.textContent = 'Preparing...';
+
+        instrumentButton.onclick = async () => {
+            instrumentButton.disabled = true;
+            instrumentButton.textContent = 'Preparing...';
 
             const dialog = document.createElement('div');
             dialog.style.cssText = `
@@ -585,11 +666,23 @@ console.log(\`Processed: \${processData(data)}\`);
             inputArea.rows = 15;
             inputArea.placeholder = "// ==UserScript==\n// ... your script ...\n// ==/UserScript==\n\n(async function() {\n  'use strict';\n  // ... your code ...\n})();";
             inputArea.style.width = '100%';
-            inputArea.value = `// ==UserScript==
-${Array.from(document.head.querySelectorAll('script')).find(s => s.textContent.includes('@name         JavaScript Code Analyzer'))?.textContent.match(/\/\/ @name         JavaScript Code Analyzer[\s\S]*?\/\/ ==\/UserScript==/s)?.[0] || `// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
+            // Attempt to prefill - this is complex and might not be perfectly robust
+            let prefillContent = '';
+            try {
+                const scriptTag = Array.from(document.head.querySelectorAll('script')).find(s => s.textContent.includes('@name         JavaScript Code Analyzer'));
+                if (scriptTag && scriptTag.textContent) {
+                    const match = scriptTag.textContent.match(/\/\/ ==UserScript==[\s\S]*?\/\/ ==\/UserScript==/s);
+                    if (match && match[0]) {
+                         prefillContent = match[0];
+                    }
+                }
+                prefillContent += "\n\n" + arguments.callee.toString(); // The IIFE itself
+            } catch(e) { console.warn("Error prefilling script content", e);}
+            inputArea.value = prefillContent || `// ==UserScript==
+// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
 // @namespace    http://tampermonkey.net/
-// @version      0.3.1
-// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection (auto-reloads with instrumented code) and Mermaid flow visualization.
+// @version      0.3.2
+// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection (auto-reloads with instrumented code), revert option, and Mermaid flow visualization.
 // @author       ZLudany (enhanced by AI)
 // @match        https://home.google.com/*
 // @connect      cdn.jsdelivr.net
@@ -597,37 +690,26 @@ ${Array.from(document.head.querySelectorAll('script')).find(s => s.textContent.i
 // @connect      *.mlc.ai
 // @connect      cdnjs.cloudflare.com
 // @grant        GM_setClipboard
-// @date         2023-10-28T12:30:00+00:00
-// ==/UserScript==`}
+// @date         2023-10-28T13:00:00+00:00
+// ==/UserScript==
 
 (async function() {
     'use strict';
-    // --- PASTE THE REST OF YOUR SCRIPT'S IIFE CONTENT HERE ---
-    // For example, from the line after "'use strict';" down to the final "})();"
-    // This part is tricky to auto-fill perfectly without knowing the exact script structure if it changes.
-    // The above attempts to grab the header. The IIFE body needs to be added.
-    // A simpler approach for the user might be to just provide the full script manually.
-    // For now, I'll just use the current function's string representation (which is this IIFE).
-    // This is not perfect because it will include the instrumentation UI logic itself,
-    // which is usually not what you want to instrument.
-    // The BEST is to manually paste the *clean* original script source.
-    const thisScriptContent = arguments.callee.toString();
-    const startOfIIFEBody = thisScriptContent.indexOf("'use strict';") + "'use strict';".length;
-    const endOfIIFEBody = thisScriptContent.lastIndexOf('})();');
-    inputArea.value += '\n\n' + thisScriptContent.substring(startOfIIFEBody, endOfIIFEBody) + "\n})();";
+    // PASTE YOUR SCRIPT'S IIFE BODY HERE
+})();`;
 
             dialog.appendChild(inputArea);
 
             const processButton = document.createElement('button');
-            processButton.textContent = 'Instrument & Reload Page';
+            processButton.textContent = 'Process, Store & Reload Page';
             dialog.appendChild(processButton);
 
             const closeButton = document.createElement('button');
             closeButton.textContent = 'Cancel';
             closeButton.onclick = () => {
                 dialog.remove();
-                devButton.disabled = false;
-                devButton.textContent = 'Instrument & Reload Script';
+                instrumentButton.disabled = false;
+                instrumentButton.textContent = window.ZLU_INSTRUMENTED_ACTIVE === true ? 'Re-Instrument & Reload Script' : 'Instrument & Reload Script';
             };
             dialog.appendChild(closeButton);
 
@@ -635,7 +717,7 @@ ${Array.from(document.head.querySelectorAll('script')).find(s => s.textContent.i
 
             try {
                 const worker = await getAcornWorker();
-                devButton.textContent = 'Instrument & Reload Script';
+                instrumentButton.textContent = window.ZLU_INSTRUMENTED_ACTIVE === true ? 'Re-Instrument & Reload Script' : 'Instrument & Reload Script';
                 processButton.disabled = false;
 
                 processButton.onclick = async () => {
@@ -650,7 +732,8 @@ ${Array.from(document.head.querySelectorAll('script')).find(s => s.textContent.i
 
                     worker.onmessage = (e) => {
                         if (e.data.success) {
-                            localStorage.setItem(INSTRUMENTED_CODE_KEY, e.data.modifiedCode);
+                            const finalInstrumentedCode = "window.ZLU_INSTRUMENTED_ACTIVE = true;\n" + e.data.modifiedCode;
+                            localStorage.setItem(INSTRUMENTED_CODE_KEY, finalInstrumentedCode);
                             localStorage.setItem(RELOAD_FLAG_KEY, 'true');
                             localStorage.setItem(RELOAD_FLAG_KEY + '_marker', 'true');
                             localStorage.setItem(RELOAD_FLAG_KEY + '_just_reloaded_for_instrumentation', 'true');
@@ -658,26 +741,23 @@ ${Array.from(document.head.querySelectorAll('script')).find(s => s.textContent.i
                             location.reload();
                         } else {
                             alert(`Error during instrumentation:\n${e.data.error}\nPage will not reload.`);
-                            processButton.textContent = 'Instrument & Reload Page';
+                            processButton.textContent = 'Process, Store & Reload Page';
                             processButton.disabled = false;
                             closeButton.disabled = false;
                         }
                     };
                     worker.onerror = (err) => {
                          alert(`Worker communication error:\n${err.message}\nPage will not reload.`);
-                         processButton.textContent = 'Instrument & Reload Page';
+                         processButton.textContent = 'Process, Store & Reload Page';
                          processButton.disabled = false;
                          closeButton.disabled = false;
                     };
 
                     const functionsToIgnore = [
                         'trace', 'getFunc', 'loadScript', 'loadWebLLMScript',
-                        '_initialize', '_ensureInitialized', 'analyze', 'resetChat', 'dispose', // JSCodeAnalyzer methods
-                        'runAnalyzerDemo', 'updateProgress', 'checkForCriticalIssues', 'renderMermaidDiagram', // Demo functions
-                        'setupDevInstrumentationUI', 'initializeApp', // Dev UI and init functions
-                        'getAcornWorker' // Worker utility
-                        // The IIFE itself (anonymous function wrapper) will also be instrumented if not careful,
-                        // but the current Acorn worker logic focuses on named/arrow functions.
+                        '_initialize', '_ensureInitialized', 'analyze', 'resetChat', 'dispose',
+                        'runAnalyzerDemo', 'updateProgress', 'checkForCriticalIssues', 'renderMermaidDiagram',
+                        'setupDevInstrumentationUI', 'initializeApp', 'getAcornWorker'
                     ];
 
                     worker.postMessage({
@@ -691,10 +771,10 @@ ${Array.from(document.head.querySelectorAll('script')).find(s => s.textContent.i
 
             } catch (err) {
                 console.error("Failed to setup dev instrumentation UI:", err);
-                alert("Error loading dev tools: " + err..message);
+                alert("Error loading dev tools: " + err.message);
                 dialog.remove();
-                devButton.disabled = false;
-                devButton.textContent = 'Instrument & Reload Script';
+                instrumentButton.disabled = false;
+                instrumentButton.textContent = window.ZLU_INSTRUMENTED_ACTIVE === true ? 'Re-Instrument & Reload Script' : 'Instrument & Reload Script';
             }
         };
     }
