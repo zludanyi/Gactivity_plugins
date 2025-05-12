@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
 // @namespace    http://tampermonkey.net/
-// @version      0.3.9.5
-// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection. Worker dependencies are pre-fetched by main thread and 'window', 'module', 'exports', 'require' are mocked for worker eval.
+// @version      0.3.9.6
+// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection. Worker dependencies are pre-fetched by main thread and 'window', 'module', 'exports', 'require' (including 'fs') are mocked for worker eval.
 // @author       ZLudany (enhanced by AI)
 // @match        https://home.google.com/*
 // @connect      cdn.jsdelivr.net       // For WebLLM library, Mermaid, Acorn, Escodegen, ESTraverse, SourceMap
@@ -11,8 +11,8 @@
 // ==/UserScript==
 
 // Top-level scope of the userscript
-const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_5';
-const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_5';
+const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_6';
+const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_6';
 let runOriginalScriptMainIIFE = true;
 
 if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
@@ -142,36 +142,36 @@ if (runOriginalScriptMainIIFE) {
 self.onmessage = async (event) => {
     const { sourceCode, acornCode, escodegenCode, estraverseCode, sourceMapCode, functionsToIgnore } = event.data;
     
-    // Store original global properties that might be overwritten
     const originalWindow = self.window;
     const originalRequire = self.require;
     const originalModule = self.module;
     const originalExports = self.exports;
 
     try {
-        self.window = self; // Mock window globally for all evals
+        self.window = self; 
 
-        // Mock require globally for all evals
         self.require = function(moduleName) {
             console.log("Worker: Mock require called for:", moduleName);
+            if (moduleName === 'fs') {
+                console.warn("Worker: Mocked 'fs' module requested. Returning empty object.");
+                return {}; // Common way to mock 'fs' in browser/worker
+            }
             if (moduleName === 'source-map' && (typeof self.sourceMap === 'object' || typeof self.sourceMap === 'function')) return self.sourceMap;
             if (moduleName === 'estraverse' && (typeof self.estraverse === 'object' || typeof self.estraverse === 'function')) return self.estraverse;
-            // Add more direct mappings if other known modules are required
-            // e.g., if (moduleName === 'esutils' && self.esutils) return self.esutils;
-            if (typeof originalRequire === 'function') { // Fallback to an original require if it existed
+            
+            if (typeof originalRequire === 'function') {
                 return originalRequire.apply(this, arguments);
             }
             console.error("Worker: Mock require cannot resolve module:", moduleName);
             throw new Error("Worker: Mock require cannot resolve module: " + moduleName);
         };
         
-        var module, exports; // Declare for function scope within evalLibrary
+        var module, exports;
 
-        // Helper to eval a library and assign its export to self if not already done by the UMD
         function evalLibrary(code, libName, selfPropertyName) {
             if (code && typeof self[selfPropertyName] === 'undefined') {
                 console.log(\`Worker: Evaluating \${libName} code...\`);
-                module = { exports: {} }; // Fresh module/exports for each library
+                module = { exports: {} }; 
                 exports = module.exports;
                 eval(code);
                 if (typeof self[selfPropertyName] === 'undefined' && (typeof module.exports === 'object' || typeof module.exports === 'function') && Object.keys(module.exports).length > 0) {
@@ -230,11 +230,10 @@ self.onmessage = async (event) => {
         console.error("Acorn Worker Error (inside worker onmessage):", error, error.stack);
         self.postMessage({ success: false, error: "Worker script loading/processing error: " + error.message + (error.stack ? '\\\\n' + error.stack : '') });
     } finally {
-        // Restore original global properties
         self.require = originalRequire;
         self.module = originalModule;
         self.exports = originalExports;
-        if (typeof originalWindow === 'undefined' && self.window === self) { delete self.window; } // Clean up our mock window only if no original
+        if (typeof originalWindow === 'undefined' && self.window === self) { delete self.window; } 
         else { self.window = originalWindow; }
     }
 };
@@ -350,8 +349,8 @@ self.onmessage = async (event) => {
         };
         window.ZLU.JSCodeAnalyzer = JSCodeAnalyzer;
 
-        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9.5): Running INSTRUMENTED version."); }
-        else { console.log("JSCodeAnalyzer (V0.3.9.5): Running ORIGINAL version."); }
+        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9.6): Running INSTRUMENTED version."); }
+        else { console.log("JSCodeAnalyzer (V0.3.9.6): Running ORIGINAL version."); }
         console.log(`Default model for analysis: ${DEFAULT_MODEL_ID}`);
 
         async function runAnalyzerDemo(){
@@ -402,7 +401,7 @@ self.onmessage = async (event) => {
                 const paragraph=document.createElement('p'); paragraph.innerHTML=`Paste <strong>original userscript source</strong>. It's processed, stored, then page reloads.`; paragraph.style.fontSize='13px'; dialogDiv.appendChild(paragraph);
                 const label=document.createElement('label'); label.textContent='Original Script Source:'; dialogDiv.appendChild(label);
                 const textarea=document.createElement('textarea'); textarea.rows=15; textarea.placeholder="// ==UserScript==..."; textarea.style.width='100%';
-                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9.5\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
+                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9.6\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
                 let prefillIIFE = '(async function() { /* Paste IIFE body here */ })();';
                 try {
                     if (document.currentScript && document.currentScript.textContent) {
