@@ -1,18 +1,18 @@
 // ==UserScript==
 // @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
 // @namespace    http://tampermonkey.net/
-// @version      0.3.9.1
-// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection (auto-reloads with instrumented code), revert option, and Mermaid flow visualization. Worker dependencies are pre-fetched by main thread. Addresses 'require' error.
+// @version      0.3.9.2
+// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection. Worker dependencies (Acorn, Escodegen, EStraverse, SourceMap) are pre-fetched by main thread to avoid 'require' errors in worker.
 // @author       ZLudany (enhanced by AI)
 // @match        https://home.google.com/*
-// @connect      cdn.jsdelivr.net       // For WebLLM library, Mermaid, Acorn, Escodegen, ESTraverse
+// @connect      cdn.jsdelivr.net       // For WebLLM library, Mermaid, Acorn, Escodegen, ESTraverse, SourceMap
 // @connect      huggingface.co        // Common CDN for WebLLM models
 // @connect      *.mlc.ai              // Official MLC CDNs for models and wasm
 // ==/UserScript==
 
 // Top-level scope of the userscript
-const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_1';
-const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_1';
+const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_2';
+const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_2';
 let runOriginalScriptMainIIFE = true;
 
 if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
@@ -51,9 +51,10 @@ if (runOriginalScriptMainIIFE) {
         const DEV_MODE = true;
         const WEB_LLM_LIBRARY_SRC = 'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@latest/dist/web-llm.js';
         const DEFAULT_MODEL_ID = "Llama-3-8B-Instruct-q4f16_1";
-        const ACORN_CDN = 'https://cdn.jsdelivr.net/npm/acorn@8.11.0/dist/acorn.min.js'; // Usually fine
-        const ESCODEGEN_CDN = 'https://cdn.jsdelivr.net/npm/escodegen@2.1.0/escodegen.js'; // Trying non-minified UMD
-        const ESTRAVERSE_CDN = 'https://cdn.jsdelivr.net/npm/estraverse@5.3.0/estraverse.js'; // Trying non-minified UMD
+        const ACORN_CDN = 'https://cdn.jsdelivr.net/npm/acorn@8.11.0/dist/acorn.min.js';
+        const ESCODEGEN_CDN = 'https://cdn.jsdelivr.net/npm/escodegen@2.1.0/escodegen.js';
+        const ESTRAVERSE_CDN = 'https://cdn.jsdelivr.net/npm/estraverse@5.3.0/estraverse.js';
+        const SOURCE_MAP_CDN = 'https://cdn.jsdelivr.net/npm/source-map@0.7.4/dist/source-map.min.js';
         const MERMAID_CDN = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
 
         if (typeof window.ZLU === 'undefined') {
@@ -139,29 +140,56 @@ if (runOriginalScriptMainIIFE) {
         };
         const ACORN_WORKER_SOURCE = `
 self.onmessage = async (event) => {
-    const { sourceCode, acornCode, escodegenCode, estraverseCode, functionsToIgnore } = event.data;
+    const { sourceCode, acornCode, escodegenCode, estraverseCode, sourceMapCode, functionsToIgnore } = event.data;
     try {
-        if (acornCode && typeof self.acorn === 'undefined') {
-            console.log("Worker: Evaluating Acorn code...");
-            eval(acornCode); // Acorn attaches to self
-            console.log("Worker: Acorn evaluated. Type: ", typeof self.acorn);
-            if(typeof self.acorn !== 'object' && typeof self.acorn !== 'function') throw new Error("Acorn did not attach to self correctly.");
-        }
-        if (escodegenCode && typeof self.escodegen === 'undefined') {
-            console.log("Worker: Evaluating Escodegen code...");
-            eval(escodegenCode); // Escodegen attaches to self
-            console.log("Worker: Escodegen evaluated. Type: ", typeof self.escodegen);
-             if(typeof self.escodegen !== 'object' && typeof self.escodegen !== 'function') throw new Error("Escodegen did not attach to self correctly.");
+        // Eval in specific order to satisfy dependencies
+        if (sourceMapCode && typeof self.sourceMap === 'undefined') {
+            console.log("Worker: Evaluating SourceMap code...");
+            eval(sourceMapCode); // source-map library usually attaches to self.sourceMap
+            console.log("Worker: SourceMap evaluated. Type: ", typeof self.sourceMap);
+            if(typeof self.sourceMap !== 'object' && typeof self.sourceMap !== 'function') {
+                 console.warn("Worker: self.sourceMap might not be correctly set by source-map library eval.");
+            }
         }
         if (estraverseCode && typeof self.estraverse === 'undefined') {
             console.log("Worker: Evaluating EStraverse code...");
-            eval(estraverseCode); // EStraverse attaches to self
+            eval(estraverseCode);
             console.log("Worker: EStraverse evaluated. Type: ", typeof self.estraverse);
             if(typeof self.estraverse !== 'object' && typeof self.estraverse !== 'function') throw new Error("Estraverse did not attach to self correctly.");
         }
+        if (acornCode && typeof self.acorn === 'undefined') {
+            console.log("Worker: Evaluating Acorn code...");
+            eval(acornCode);
+            console.log("Worker: Acorn evaluated. Type: ", typeof self.acorn);
+            if(typeof self.acorn !== 'object' && typeof self.acorn !== 'function') throw new Error("Acorn did not attach to self correctly.");
+        }
+
+        const originalRequire = self.require; // Save original require if any
+        self.require = function(moduleName) { // Define mock require
+            console.log("Worker: Mock require called for:", moduleName);
+            if (moduleName === 'source-map' && (typeof self.sourceMap === 'object' || typeof self.sourceMap === 'function')) {
+                return self.sourceMap;
+            }
+            if (moduleName === 'estraverse' && (typeof self.estraverse === 'object' || typeof self.estraverse === 'function')) {
+                return self.estraverse;
+            }
+            if (typeof originalRequire === 'function') { // Fallback to original if it existed
+                return originalRequire.apply(this, arguments);
+            }
+            console.error("Worker: Mock require cannot resolve module:", moduleName);
+            throw new Error("Worker: Mock require cannot resolve module: " + moduleName);
+        };
+
+        if (escodegenCode && typeof self.escodegen === 'undefined') {
+            console.log("Worker: Evaluating Escodegen code (with mock require)...");
+            eval(escodegenCode);
+            console.log("Worker: Escodegen evaluated. Type: ", typeof self.escodegen);
+            if(typeof self.escodegen !== 'object' && typeof self.escodegen !== 'function') throw new Error("Escodegen did not attach to self correctly.");
+        }
+        self.require = originalRequire; // Restore original require
 
         if (!self.acorn || !self.escodegen || !self.estraverse) {
-            throw new Error("Worker: One or more AST libraries are not available on self after eval.");
+            throw new Error("Worker: One or more AST libraries (Acorn, Escodegen, Estraverse) are not available on self after eval.");
         }
 
         const ast = self.acorn.parse(sourceCode, { ecmaVersion: 'latest', sourceType: 'script', locations: false });
@@ -222,23 +250,26 @@ self.onmessage = async (event) => {
             if (!window.ZLU.fetchedLibraryCode) {
                 console.log("Pre-fetching AST libraries for worker...");
                 try {
-                    const [acornCode, escodegenCode, estraverseCode] = await Promise.all([
+                    const [acornCode, escodegenCode, estraverseCode, sourceMapCode] = await Promise.all([
                         fetchScriptAsText(ACORN_CDN, "Acorn"),
                         fetchScriptAsText(ESCODEGEN_CDN, "Escodegen"),
-                        fetchScriptAsText(ESTRAVERSE_CDN, "Estraverse")
+                        fetchScriptAsText(ESTRAVERSE_CDN, "Estraverse"),
+                        fetchScriptAsText(SOURCE_MAP_CDN, "SourceMap")
                     ]);
-                    window.ZLU.fetchedLibraryCode = { acornCode, escodegenCode, estraverseCode };
+                    window.ZLU.fetchedLibraryCode = { acornCode, escodegenCode, estraverseCode, sourceMapCode };
                     console.log("AST libraries pre-fetched successfully.");
                 } catch (error) {
                     console.error("Failed to pre-fetch one or more AST libraries for worker:", error);
-                    window.ZLU.fetchedLibraryCode = null; // Clear partial fetches
-                    throw error; // Re-throw to be caught by UI setup
+                    window.ZLU.fetchedLibraryCode = null;
+                    throw error;
                 }
             }
-             // Additional check to ensure all codes are non-empty
-            if (!window.ZLU.fetchedLibraryCode || !window.ZLU.fetchedLibraryCode.acornCode?.trim() || !window.ZLU.fetchedLibraryCode.escodegenCode?.trim() || !window.ZLU.fetchedLibraryCode.estraverseCode?.trim()) {
+            if (!window.ZLU.fetchedLibraryCode || !window.ZLU.fetchedLibraryCode.acornCode?.trim() ||
+                !window.ZLU.fetchedLibraryCode.escodegenCode?.trim() || !window.ZLU.fetchedLibraryCode.estraverseCode?.trim() ||
+                !window.ZLU.fetchedLibraryCode.sourceMapCode?.trim()
+            ) {
                 console.error("One or more fetched AST library codes are empty.", window.ZLU.fetchedLibraryCode);
-                window.ZLU.fetchedLibraryCode = null; // Invalidate
+                window.ZLU.fetchedLibraryCode = null;
                 throw new Error("One or more AST libraries could not be fetched or their content was empty.");
             }
             return window.ZLU.fetchedLibraryCode;
@@ -325,8 +356,8 @@ self.onmessage = async (event) => {
         };
         window.ZLU.JSCodeAnalyzer = JSCodeAnalyzer;
 
-        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9.1): Running INSTRUMENTED version."); }
-        else { console.log("JSCodeAnalyzer (V0.3.9.1): Running ORIGINAL version."); }
+        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9.2): Running INSTRUMENTED version."); }
+        else { console.log("JSCodeAnalyzer (V0.3.9.2): Running ORIGINAL version."); }
         console.log(`Default model for analysis: ${DEFAULT_MODEL_ID}`);
 
         async function runAnalyzerDemo(){
@@ -377,7 +408,7 @@ self.onmessage = async (event) => {
                 const paragraph=document.createElement('p'); paragraph.innerHTML=`Paste <strong>original userscript source</strong>. It's processed, stored, then page reloads.`; paragraph.style.fontSize='13px'; dialogDiv.appendChild(paragraph);
                 const label=document.createElement('label'); label.textContent='Original Script Source:'; dialogDiv.appendChild(label);
                 const textarea=document.createElement('textarea'); textarea.rows=15; textarea.placeholder="// ==UserScript==..."; textarea.style.width='100%';
-                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9.1\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
+                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9.2\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
                 let prefillIIFE = '(async function() { /* Paste IIFE body here */ })();';
                 try {
                     if (document.currentScript && document.currentScript.textContent) {
@@ -415,6 +446,7 @@ self.onmessage = async (event) => {
                             acornCode: window.ZLU.fetchedLibraryCode.acornCode,
                             escodegenCode: window.ZLU.fetchedLibraryCode.escodegenCode,
                             estraverseCode: window.ZLU.fetchedLibraryCode.estraverseCode,
+                            sourceMapCode: window.ZLU.fetchedLibraryCode.sourceMapCode,
                             functionsToIgnore:functionsToIgnoreList
                         });
                     };
