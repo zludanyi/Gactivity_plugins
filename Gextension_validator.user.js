@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
 // @namespace    http://tampermonkey.net/
-// @version      0.3.9.10
-// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection. Worker dependencies (Acorn, Escodegen, EStraverse, SourceMap, ESUtils and its components) are pre-fetched and environment mocked for worker eval.
+// @version      0.3.9.11
+// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection. Worker dependencies are pre-fetched and environment (window, module, exports, require including fs, path, ./package.json) are mocked for worker eval.
 // @author       ZLudany (enhanced by AI)
 // @match        https://home.google.com/*
 // @connect      cdn.jsdelivr.net       // For WebLLM library, Mermaid, Acorn, Escodegen, ESTraverse, SourceMap, ESUtils
@@ -11,8 +11,8 @@
 // ==/UserScript==
 
 // Top-level scope of the userscript
-const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_10';
-const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_10';
+const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_11';
+const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_11';
 let runOriginalScriptMainIIFE = true;
 
 if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
@@ -58,7 +58,7 @@ if (runOriginalScriptMainIIFE) {
         const ESUTILS_AST_CDN = 'https://cdn.jsdelivr.net/npm/esutils@2.0.3/lib/ast.js';
         const ESUTILS_CODE_CDN = 'https://cdn.jsdelivr.net/npm/esutils@2.0.3/lib/code.js';
         const ESUTILS_KEYWORD_CDN = 'https://cdn.jsdelivr.net/npm/esutils@2.0.3/lib/keyword.js';
-        const ESUTILS_MAIN_CDN = 'https://cdn.jsdelivr.net/npm/esutils@2.0.3/lib/utils.js'; // This is likely what 'esutils' resolves to
+        const ESUTILS_MAIN_CDN = 'https://cdn.jsdelivr.net/npm/esutils@2.0.3/lib/utils.js';
         const MERMAID_CDN = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
 
         if (typeof window.ZLU === 'undefined') {
@@ -156,21 +156,27 @@ self.onmessage = async (event) => {
     try {
         self.window = self; 
 
-        // Temporary storage for eval'd sub-modules
+        // Temporary storage for eval'd sub-modules, especially for esutils' parts
         const tempModules = {};
 
         self.require = function(moduleName) {
             console.log("Worker: Mock require called for:", moduleName);
             if (moduleName === 'fs') { console.warn("Worker: Mocked 'fs' module requested. Returning empty object."); return {}; }
             if (moduleName === 'path') { console.warn("Worker: Mocked 'path' module requested. Returning empty object."); return {}; }
+            if (moduleName === './package.json') { // Handle require('./package.json')
+                console.warn("Worker: Mocked './package.json' module requested.");
+                return { version: 'mocked-version' }; // Common use case is to get version
+            }
             
+            // For esutils internal requires
             if (moduleName === './ast' && tempModules.esutils_ast) return tempModules.esutils_ast;
             if (moduleName === './code' && tempModules.esutils_code) return tempModules.esutils_code;
             if (moduleName === './keyword' && tempModules.esutils_keyword) return tempModules.esutils_keyword;
             
+            // For direct requires of main modules
             if (moduleName === 'source-map' && (typeof self.sourceMap === 'object' || typeof self.sourceMap === 'function')) return self.sourceMap;
             if (moduleName === 'estraverse' && (typeof self.estraverse === 'object' || typeof self.estraverse === 'function')) return self.estraverse;
-            if (moduleName === 'esutils' && (typeof self.esutils === 'object' || typeof self.esutils === 'function')) return self.esutils; // For when escodegen requires 'esutils'
+            if (moduleName === 'esutils' && (typeof self.esutils === 'object' || typeof self.esutils === 'function')) return self.esutils;
             
             if (typeof originalRequire === 'function') {
                 return originalRequire.apply(this, arguments);
@@ -179,7 +185,7 @@ self.onmessage = async (event) => {
             throw new Error("Worker: Mock require cannot resolve module: " + moduleName);
         };
         
-        var module, exports; // Declare for function scope within evalLibrary
+        var module, exports;
 
         function evalLibrary(code, libName, selfPropertyName, tempModuleStoreName) {
             if (code && (typeof self[selfPropertyName] === 'undefined' && (tempModuleStoreName ? typeof tempModules[tempModuleStoreName] === 'undefined' : true))) {
@@ -194,7 +200,7 @@ self.onmessage = async (event) => {
                 }
 
                 if (tempModuleStoreName) {
-                    tempModules[tempModuleStoreName] = assignedExport || {}; // Store even if empty to satisfy require
+                    tempModules[tempModuleStoreName] = assignedExport || {};
                     console.log(\`Worker: \${libName} stored in tempModules.\${tempModuleStoreName}. Type: \`, typeof tempModules[tempModuleStoreName]);
 
                 } else if (selfPropertyName) {
@@ -213,11 +219,11 @@ self.onmessage = async (event) => {
         evalLibrary(esutilsAstCode, "ESUtils AST", null, "esutils_ast");
         evalLibrary(esutilsCodeCode, "ESUtils Code", null, "esutils_code");
         evalLibrary(esutilsKeywordCode, "ESUtils Keyword", null, "esutils_keyword");
-        evalLibrary(esutilsMainCode, "ESUtils Main (utils.js)", "esutils"); // This should now work, using mocked requires for its parts
+        evalLibrary(esutilsMainCode, "ESUtils Main (utils.js)", "esutils");
 
         evalLibrary(estraverseCode, "EStraverse", "estraverse");
         evalLibrary(acornCode, "Acorn", "acorn");
-        evalLibrary(escodegenCode, "Escodegen", "escodegen"); // Escodegen should now find 'esutils' via the mock require
+        evalLibrary(escodegenCode, "Escodegen", "escodegen");
         
         if (!self.acorn || !self.escodegen || !self.estraverse) {
             throw new Error("Worker: One or more AST libraries (Acorn, Escodegen, Estraverse) are not available on self after eval.");
@@ -384,8 +390,8 @@ self.onmessage = async (event) => {
         };
         window.ZLU.JSCodeAnalyzer = JSCodeAnalyzer;
 
-        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9.10): Running INSTRUMENTED version."); }
-        else { console.log("JSCodeAnalyzer (V0.3.9.10): Running ORIGINAL version."); }
+        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9.11): Running INSTRUMENTED version."); }
+        else { console.log("JSCodeAnalyzer (V0.3.9.11): Running ORIGINAL version."); }
         console.log(`Default model for analysis: ${DEFAULT_MODEL_ID}`);
 
         async function runAnalyzerDemo(){
@@ -436,7 +442,7 @@ self.onmessage = async (event) => {
                 const paragraph=document.createElement('p'); paragraph.innerHTML=`Paste <strong>original userscript source</strong>. It's processed, stored, then page reloads.`; paragraph.style.fontSize='13px'; dialogDiv.appendChild(paragraph);
                 const label=document.createElement('label'); label.textContent='Original Script Source:'; dialogDiv.appendChild(label);
                 const textarea=document.createElement('textarea'); textarea.rows=15; textarea.placeholder="// ==UserScript==..."; textarea.style.width='100%';
-                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9.10\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
+                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9.11\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
                 let prefillIIFE = '(async function() { /* Paste IIFE body here */ })();';
                 try {
                     if (document.currentScript && document.currentScript.textContent) {
