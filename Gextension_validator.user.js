@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
 // @namespace    http://tampermonkey.net/
-// @version      0.3.9
-// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection (auto-reloads with instrumented code), revert option, and Mermaid flow visualization. Worker dependencies are pre-fetched by main thread.
+// @version      0.3.9.1
+// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection (auto-reloads with instrumented code), revert option, and Mermaid flow visualization. Worker dependencies are pre-fetched by main thread. Addresses 'require' error.
 // @author       ZLudany (enhanced by AI)
 // @match        https://home.google.com/*
 // @connect      cdn.jsdelivr.net       // For WebLLM library, Mermaid, Acorn, Escodegen, ESTraverse
@@ -11,8 +11,8 @@
 // ==/UserScript==
 
 // Top-level scope of the userscript
-const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9';
-const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9';
+const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_1';
+const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_1';
 let runOriginalScriptMainIIFE = true;
 
 if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
@@ -51,9 +51,9 @@ if (runOriginalScriptMainIIFE) {
         const DEV_MODE = true;
         const WEB_LLM_LIBRARY_SRC = 'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@latest/dist/web-llm.js';
         const DEFAULT_MODEL_ID = "Llama-3-8B-Instruct-q4f16_1";
-        const ACORN_CDN = 'https://cdn.jsdelivr.net/npm/acorn@8.11.0/dist/acorn.min.js';
-        const ESCODEGEN_CDN = 'https://cdn.jsdelivr.net/npm/escodegen@2.1.0/escodegen.min.js';
-        const ESTRAVERSE_CDN = 'https://cdn.jsdelivr.net/npm/estraverse@5.3.0/estraverse.min.js';
+        const ACORN_CDN = 'https://cdn.jsdelivr.net/npm/acorn@8.11.0/dist/acorn.min.js'; // Usually fine
+        const ESCODEGEN_CDN = 'https://cdn.jsdelivr.net/npm/escodegen@2.1.0/escodegen.js'; // Trying non-minified UMD
+        const ESTRAVERSE_CDN = 'https://cdn.jsdelivr.net/npm/estraverse@5.3.0/estraverse.js'; // Trying non-minified UMD
         const MERMAID_CDN = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
 
         if (typeof window.ZLU === 'undefined') {
@@ -61,7 +61,7 @@ if (runOriginalScriptMainIIFE) {
         }
         window.ZLU.executionPaths = window.ZLU.executionPaths || new Set();
         window.ZLU.DEFAULT_JS_ANALYZER_MODEL_ID = DEFAULT_MODEL_ID;
-        window.ZLU.fetchedLibraryCode = null; // To store pre-fetched library code for the worker
+        window.ZLU.fetchedLibraryCode = null;
 
         function getFunc(f){
             if (typeof f !== 'function') { return null; }
@@ -99,7 +99,7 @@ if (runOriginalScriptMainIIFE) {
         window.ZLU.trace = trace;
 
         const loadedScripts = {};
-        async function loadScript(url, id){ // For <script> tag injection
+        async function loadScript(url, id){
             if (loadedScripts[id || url]) { return loadedScripts[id || url]; }
             const promise = new Promise((resolve, reject) => {
                 const script = document.createElement('script');
@@ -141,24 +141,27 @@ if (runOriginalScriptMainIIFE) {
 self.onmessage = async (event) => {
     const { sourceCode, acornCode, escodegenCode, estraverseCode, functionsToIgnore } = event.data;
     try {
-        if (acornCode && !self.acorn) {
+        if (acornCode && typeof self.acorn === 'undefined') {
             console.log("Worker: Evaluating Acorn code...");
-            eval(acornCode);
-            console.log("Worker: Acorn evaluated.", typeof self.acorn);
+            eval(acornCode); // Acorn attaches to self
+            console.log("Worker: Acorn evaluated. Type: ", typeof self.acorn);
+            if(typeof self.acorn !== 'object' && typeof self.acorn !== 'function') throw new Error("Acorn did not attach to self correctly.");
         }
-        if (escodegenCode && !self.escodegen) {
+        if (escodegenCode && typeof self.escodegen === 'undefined') {
             console.log("Worker: Evaluating Escodegen code...");
-            eval(escodegenCode);
-            console.log("Worker: Escodegen evaluated.", typeof self.escodegen);
+            eval(escodegenCode); // Escodegen attaches to self
+            console.log("Worker: Escodegen evaluated. Type: ", typeof self.escodegen);
+             if(typeof self.escodegen !== 'object' && typeof self.escodegen !== 'function') throw new Error("Escodegen did not attach to self correctly.");
         }
-        if (estraverseCode && !self.estraverse) {
+        if (estraverseCode && typeof self.estraverse === 'undefined') {
             console.log("Worker: Evaluating EStraverse code...");
-            eval(estraverseCode);
-            console.log("Worker: EStraverse evaluated.", typeof self.estraverse);
+            eval(estraverseCode); // EStraverse attaches to self
+            console.log("Worker: EStraverse evaluated. Type: ", typeof self.estraverse);
+            if(typeof self.estraverse !== 'object' && typeof self.estraverse !== 'function') throw new Error("Estraverse did not attach to self correctly.");
         }
 
         if (!self.acorn || !self.escodegen || !self.estraverse) {
-            throw new Error("Worker: One or more AST libraries failed to evaluate/initialize after being passed as code strings.");
+            throw new Error("Worker: One or more AST libraries are not available on self after eval.");
         }
 
         const ast = self.acorn.parse(sourceCode, { ecmaVersion: 'latest', sourceType: 'script', locations: false });
@@ -209,7 +212,7 @@ self.onmessage = async (event) => {
         }
         self.postMessage({ success: true, modifiedCode: modifiedCode });
     } catch (error) {
-        console.error("Acorn Worker Error (inside worker onmessage):", error);
+        console.error("Acorn Worker Error (inside worker onmessage):", error, error.stack);
         self.postMessage({ success: false, error: "Worker script loading/processing error: " + error.message + (error.stack ? '\\\\n' + error.stack : '') });
     }
 };
@@ -228,12 +231,15 @@ self.onmessage = async (event) => {
                     console.log("AST libraries pre-fetched successfully.");
                 } catch (error) {
                     console.error("Failed to pre-fetch one or more AST libraries for worker:", error);
-                    window.ZLU.fetchedLibraryCode = null;
-                    throw error;
+                    window.ZLU.fetchedLibraryCode = null; // Clear partial fetches
+                    throw error; // Re-throw to be caught by UI setup
                 }
             }
-            if (!window.ZLU.fetchedLibraryCode || !window.ZLU.fetchedLibraryCode.acornCode || !window.ZLU.fetchedLibraryCode.escodegenCode || !window.ZLU.fetchedLibraryCode.estraverseCode) {
-                throw new Error("One or more AST libraries could not be fetched or were empty.");
+             // Additional check to ensure all codes are non-empty
+            if (!window.ZLU.fetchedLibraryCode || !window.ZLU.fetchedLibraryCode.acornCode?.trim() || !window.ZLU.fetchedLibraryCode.escodegenCode?.trim() || !window.ZLU.fetchedLibraryCode.estraverseCode?.trim()) {
+                console.error("One or more fetched AST library codes are empty.", window.ZLU.fetchedLibraryCode);
+                window.ZLU.fetchedLibraryCode = null; // Invalidate
+                throw new Error("One or more AST libraries could not be fetched or their content was empty.");
             }
             return window.ZLU.fetchedLibraryCode;
         };
@@ -319,8 +325,8 @@ self.onmessage = async (event) => {
         };
         window.ZLU.JSCodeAnalyzer = JSCodeAnalyzer;
 
-        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9): Running INSTRUMENTED version."); }
-        else { console.log("JSCodeAnalyzer (V0.3.9): Running ORIGINAL version."); }
+        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9.1): Running INSTRUMENTED version."); }
+        else { console.log("JSCodeAnalyzer (V0.3.9.1): Running ORIGINAL version."); }
         console.log(`Default model for analysis: ${DEFAULT_MODEL_ID}`);
 
         async function runAnalyzerDemo(){
@@ -371,7 +377,7 @@ self.onmessage = async (event) => {
                 const paragraph=document.createElement('p'); paragraph.innerHTML=`Paste <strong>original userscript source</strong>. It's processed, stored, then page reloads.`; paragraph.style.fontSize='13px'; dialogDiv.appendChild(paragraph);
                 const label=document.createElement('label'); label.textContent='Original Script Source:'; dialogDiv.appendChild(label);
                 const textarea=document.createElement('textarea'); textarea.rows=15; textarea.placeholder="// ==UserScript==..."; textarea.style.width='100%';
-                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
+                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9.1\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
                 let prefillIIFE = '(async function() { /* Paste IIFE body here */ })();';
                 try {
                     if (document.currentScript && document.currentScript.textContent) {
@@ -390,11 +396,11 @@ self.onmessage = async (event) => {
                 const processBtn=document.createElement('button'); processBtn.textContent='Process, Store & Reload'; processBtn.disabled = true; dialogDiv.appendChild(processBtn);
                 const closeBtn=document.createElement('button'); closeBtn.textContent='Cancel'; closeBtn.onclick=()=>{dialogDiv.remove();instrumentBtn.disabled=false;instrumentBtn.textContent=window.ZLU_INSTRUMENTED_ACTIVE===true?'Re-Instrument & Reload':'Instrument & Reload';}; dialogDiv.appendChild(closeBtn); document.body.appendChild(dialogDiv);
                 try {
-                    await ensureFetchedLibraryCode(); // Fetch libraries first
-                    const worker = await getAcornWorkerInstance(); // Then get/create worker
+                    await ensureFetchedLibraryCode();
+                    const worker = await getAcornWorkerInstance();
 
-                    instrumentBtn.textContent=window.ZLU_INSTRUMENTED_ACTIVE===true?'Re-Instrument & Reload Script':'Instrument & Reload Script'; // Reset button text
-                    processBtn.disabled=false; // Enable process button now
+                    instrumentBtn.textContent=window.ZLU_INSTRUMENTED_ACTIVE===true?'Re-Instrument & Reload Script':'Instrument & Reload Script';
+                    processBtn.disabled=false;
                     processBtn.onclick = async () => {
                         const sourceCodeToInstrument=textarea.value; if(!sourceCodeToInstrument.trim()||!sourceCodeToInstrument.includes("// ==UserScript==")||!sourceCodeToInstrument.includes("async function()")){alert("Paste full valid userscript.");return;}
                         processBtn.textContent='Processing...';processBtn.disabled=true;closeBtn.disabled=true;
