@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
 // @namespace    http://tampermonkey.net/
-// @version      0.3.9.11
-// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection. Worker dependencies are pre-fetched and environment (window, module, exports, require including fs, path, ./package.json) are mocked for worker eval.
+// @version      0.3.9.13
+// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection. Worker intelligently handles/isolates Tampermonkey wrappers before AST processing to prevent escape sequence errors.
 // @author       ZLudany (enhanced by AI)
 // @match        https://home.google.com/*
 // @connect      cdn.jsdelivr.net       // For WebLLM library, Mermaid, Acorn, Escodegen, ESTraverse, SourceMap, ESUtils
@@ -11,8 +11,8 @@
 // ==/UserScript==
 
 // Top-level scope of the userscript
-const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_11';
-const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_11';
+const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_13';
+const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_13';
 let runOriginalScriptMainIIFE = true;
 
 if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
@@ -144,7 +144,7 @@ if (runOriginalScriptMainIIFE) {
         };
         const ACORN_WORKER_SOURCE = `
 self.onmessage = async (event) => {
-    const { sourceCode, acornCode, escodegenCode, estraverseCode, sourceMapCode, 
+    let { sourceCode, acornCode, escodegenCode, estraverseCode, sourceMapCode, 
             esutilsAstCode, esutilsCodeCode, esutilsKeywordCode, esutilsMainCode, 
             functionsToIgnore } = event.data;
     
@@ -155,81 +155,89 @@ self.onmessage = async (event) => {
 
     try {
         self.window = self; 
-
-        // Temporary storage for eval'd sub-modules, especially for esutils' parts
         const tempModules = {};
-
         self.require = function(moduleName) {
             console.log("Worker: Mock require called for:", moduleName);
             if (moduleName === 'fs') { console.warn("Worker: Mocked 'fs' module requested. Returning empty object."); return {}; }
             if (moduleName === 'path') { console.warn("Worker: Mocked 'path' module requested. Returning empty object."); return {}; }
-            if (moduleName === './package.json') { // Handle require('./package.json')
-                console.warn("Worker: Mocked './package.json' module requested.");
-                return { version: 'mocked-version' }; // Common use case is to get version
-            }
-            
-            // For esutils internal requires
+            if (moduleName === './package.json') { console.warn("Worker: Mocked './package.json' module requested."); return { version: 'mocked-version-for-worker' };}
             if (moduleName === './ast' && tempModules.esutils_ast) return tempModules.esutils_ast;
             if (moduleName === './code' && tempModules.esutils_code) return tempModules.esutils_code;
             if (moduleName === './keyword' && tempModules.esutils_keyword) return tempModules.esutils_keyword;
-            
-            // For direct requires of main modules
             if (moduleName === 'source-map' && (typeof self.sourceMap === 'object' || typeof self.sourceMap === 'function')) return self.sourceMap;
             if (moduleName === 'estraverse' && (typeof self.estraverse === 'object' || typeof self.estraverse === 'function')) return self.estraverse;
             if (moduleName === 'esutils' && (typeof self.esutils === 'object' || typeof self.esutils === 'function')) return self.esutils;
-            
-            if (typeof originalRequire === 'function') {
-                return originalRequire.apply(this, arguments);
-            }
+            if (typeof originalRequire === 'function') { return originalRequire.apply(this, arguments); }
             console.error("Worker: Mock require cannot resolve module:", moduleName);
             throw new Error("Worker: Mock require cannot resolve module: " + moduleName);
         };
-        
         var module, exports;
-
         function evalLibrary(code, libName, selfPropertyName, tempModuleStoreName) {
             if (code && (typeof self[selfPropertyName] === 'undefined' && (tempModuleStoreName ? typeof tempModules[tempModuleStoreName] === 'undefined' : true))) {
                 console.log(\`Worker: Evaluating \${libName} code...\`);
-                module = { exports: {} }; 
-                exports = module.exports;
-                eval(code);
-                
+                module = { exports: {} }; exports = module.exports; eval(code);
                 let assignedExport = null;
-                if ((typeof module.exports === 'object' || typeof module.exports === 'function') && Object.keys(module.exports).length > 0) {
-                    assignedExport = module.exports;
-                }
-
-                if (tempModuleStoreName) {
-                    tempModules[tempModuleStoreName] = assignedExport || {};
-                    console.log(\`Worker: \${libName} stored in tempModules.\${tempModuleStoreName}. Type: \`, typeof tempModules[tempModuleStoreName]);
-
-                } else if (selfPropertyName) {
-                     if (typeof self[selfPropertyName] === 'undefined' && assignedExport) {
-                        self[selfPropertyName] = assignedExport;
-                     }
-                     console.log(\`Worker: \${libName} evaluated. Type of self.\${selfPropertyName}: \`, typeof self[selfPropertyName]);
-                     if (typeof self[selfPropertyName] !== 'object' && typeof self[selfPropertyName] !== 'function') {
-                         console.warn(\`Worker: self.\${selfPropertyName} might not be correctly set after \${libName} eval for '\${libName}'.\`);
-                     }
-                }
+                if ((typeof module.exports === 'object' || typeof module.exports === 'function') && Object.keys(module.exports).length > 0) { assignedExport = module.exports; }
+                if (tempModuleStoreName) { tempModules[tempModuleStoreName] = assignedExport || {}; console.log(\`Worker: \${libName} stored in tempModules.\${tempModuleStoreName}. Type: \`, typeof tempModules[tempModuleStoreName]); }
+                else if (selfPropertyName) { if (typeof self[selfPropertyName] === 'undefined' && assignedExport) { self[selfPropertyName] = assignedExport; } console.log(\`Worker: \${libName} evaluated. Type of self.\${selfPropertyName}: \`, typeof self[selfPropertyName]); if (typeof self[selfPropertyName] !== 'object' && typeof self[selfPropertyName] !== 'function') { console.warn(\`Worker: self.\${selfPropertyName} might not be correctly set after \${libName} eval for '\${libName}'.\`); } }
             }
         }
-
         evalLibrary(sourceMapCode, "SourceMap", "sourceMap");
         evalLibrary(esutilsAstCode, "ESUtils AST", null, "esutils_ast");
         evalLibrary(esutilsCodeCode, "ESUtils Code", null, "esutils_code");
         evalLibrary(esutilsKeywordCode, "ESUtils Keyword", null, "esutils_keyword");
         evalLibrary(esutilsMainCode, "ESUtils Main (utils.js)", "esutils");
-
         evalLibrary(estraverseCode, "EStraverse", "estraverse");
         evalLibrary(acornCode, "Acorn", "acorn");
         evalLibrary(escodegenCode, "Escodegen", "escodegen");
-        
-        if (!self.acorn || !self.escodegen || !self.estraverse) {
-            throw new Error("Worker: One or more AST libraries (Acorn, Escodegen, Estraverse) are not available on self after eval.");
-        }
+        if (!self.acorn || !self.escodegen || !self.estraverse) { throw new Error("Worker: One or more AST libraries (Acorn, Escodegen, Estraverse) are not available on self after eval."); }
 
-        const ast = self.acorn.parse(sourceCode, { ecmaVersion: 'latest', sourceType: 'script', locations: false });
+        let scriptToInstrument = sourceCode;
+        let prefix = "";
+        let suffix = "";
+        // Regex for Tampermonkey's GM context wrapper (simplified, might need adjustment for different TM versions)
+        const tmUserScriptScopeRegex = /(async\s+function\s*\([\w\s,]*unsafeWindow[\w\s,]*\)\s*\{)([\s\S]*?)(\}\s*\);?\s*\}\s*\);?\s*\}\s*;?\s*window\["[^"]+"\]\s*\(.*?\);?)$/m;
+        const tmUserScriptScopeMatch = sourceCode.match(tmUserScriptScopeRegex);
+
+        if (tmUserScriptScopeMatch && tmUserScriptScopeMatch[2]) {
+            console.log("Worker: Tampermonkey GM context wrapper detected. Extracting user script core.");
+            // This is very brittle. A better way would be to extract based on a known IIFE pattern of the *actual* userscript.
+            // For now, we'll assume the user script is the content of this specific async function.
+            // This also assumes the user script header is *outside* this block.
+            const userscriptHeaderAndIIFE = tmUserScriptScopeMatch[2].trim();
+            
+            // Now, from this, extract the header and the main IIFE
+            const mainIifeRegex = /^([\s\S]*?)(\(\s*async\s+function\s*\(\s*\)\s*\{[\s\S]*?\}\s*\)\(\s*\);?)$/m;
+            const iifeMatch = userscriptHeaderAndIIFE.match(mainIifeRegex);
+            
+            if (iifeMatch && iifeMatch[2]) {
+                 prefix = sourceCode.substring(0, sourceCode.indexOf(userscriptHeaderAndIIFE)) + (iifeMatch[1] || "");
+                 scriptToInstrument = iifeMatch[2]; // The actual IIFE
+                 suffix = sourceCode.substring(sourceCode.indexOf(userscriptHeaderAndIIFE) + userscriptHeaderAndIIFE.length);
+                 console.log("Worker: User script IIFE extracted for instrumentation.");
+            } else {
+                 console.warn("Worker: Could not extract main userscript IIFE from GM wrapper content. Proceeding with the content of GM wrapper.");
+                 prefix = sourceCode.substring(0, sourceCode.indexOf(userscriptHeaderAndIIFE));
+                 scriptToInstrument = userscriptHeaderAndIIFE;
+                 suffix = sourceCode.substring(sourceCode.indexOf(userscriptHeaderAndIIFE) + userscriptHeaderAndIIFE.length);
+            }
+        } else {
+             // Fallback: try to find the last IIFE in the whole script (less reliable)
+            const fallbackIifeRegex = /([\s\S]*?)(\(\s*async\s+function\s*\(\s*\)\s*\{[\s\S]*?\}\s*\)\(\s*\);?)([\s\S]*)$/m;
+            const fallbackMatch = sourceCode.match(fallbackIifeRegex);
+            if (fallbackMatch && fallbackMatch[2]) {
+                console.warn("Worker: Tampermonkey GM wrapper not detected cleanly. Using fallback IIFE extraction.");
+                prefix = fallbackMatch[1] || "";
+                scriptToInstrument = fallbackMatch[2];
+                suffix = fallbackMatch[3] || "";
+            } else {
+                console.warn("Worker: No clear IIFE structure found. Instrumenting full sourceCode. This may be unstable if wrappers are present.");
+                // prefix, suffix remain "", scriptToInstrument is sourceCode
+            }
+        }
+        
+        console.log("Worker: Script part to instrument length:", scriptToInstrument.length);
+        const ast = self.acorn.parse(scriptToInstrument, { ecmaVersion: 'latest', sourceType: 'script', locations: false });
         self.estraverse.replace(ast, {
             enter: function (node) {
                 if (node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression') {
@@ -253,14 +261,19 @@ self.onmessage = async (event) => {
                 return node;
             }
         });
-        let modifiedCode = self.escodegen.generate(ast);
-        const iifeStartRegex = /(\\(\\s*async\\s+function\\s*\\(\\s*\\)\\s*\\{\\s*['"]use strict['"];)/m;
-        if (iifeStartRegex.test(modifiedCode)) {
-            modifiedCode = modifiedCode.replace(iifeStartRegex, "$1\\\\n    window.ZLU_INSTRUMENTED_ACTIVE = true;\\\\n    console.log('Instrumented version: ZLU_INSTRUMENTED_ACTIVE set from within instrumented code.');");
+        let instrumentedScriptPart = self.escodegen.generate(ast);
+        
+        const iifeStartRegexInternal = /(\(\s*async\s+function\s*\(\s*\)\s*\{\s*['"]use strict['"];)/m;
+        let finalInstrumentedCode;
+        if (iifeStartRegexInternal.test(instrumentedScriptPart)) {
+             const injection = "\\n    window.ZLU_INSTRUMENTED_ACTIVE = true;\\n    console.log('Instrumented version: ZLU_INSTRUMENTED_ACTIVE set from within instrumented code.');";
+             instrumentedScriptPart = instrumentedScriptPart.replace(iifeStartRegexInternal, "$1" + injection);
         } else {
-            modifiedCode = "window.ZLU_INSTRUMENTED_ACTIVE = true;\\\\nconsole.log('Instrumented version: ZLU_INSTRUMENTED_ACTIVE set globally as IIFE not detected.');\\\\n" + modifiedCode;
+            instrumentedScriptPart = "window.ZLU_INSTRUMENTED_ACTIVE = true; console.log('Instrumented version: ZLU_INSTRUMENTED_ACTIVE set (globally in part) as IIFE pattern mismatch.');\\n" + instrumentedScriptPart;
         }
-        self.postMessage({ success: true, modifiedCode: modifiedCode });
+        finalModifiedCode = prefix + instrumentedScriptPart + suffix;
+        
+        self.postMessage({ success: true, modifiedCode: finalModifiedCode });
 
     } catch (error) {
         console.error("Acorn Worker Error (inside worker onmessage):", error, error.stack);
@@ -390,8 +403,8 @@ self.onmessage = async (event) => {
         };
         window.ZLU.JSCodeAnalyzer = JSCodeAnalyzer;
 
-        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9.11): Running INSTRUMENTED version."); }
-        else { console.log("JSCodeAnalyzer (V0.3.9.11): Running ORIGINAL version."); }
+        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9.13): Running INSTRUMENTED version."); }
+        else { console.log("JSCodeAnalyzer (V0.3.9.13): Running ORIGINAL version."); }
         console.log(`Default model for analysis: ${DEFAULT_MODEL_ID}`);
 
         async function runAnalyzerDemo(){
@@ -442,7 +455,7 @@ self.onmessage = async (event) => {
                 const paragraph=document.createElement('p'); paragraph.innerHTML=`Paste <strong>original userscript source</strong>. It's processed, stored, then page reloads.`; paragraph.style.fontSize='13px'; dialogDiv.appendChild(paragraph);
                 const label=document.createElement('label'); label.textContent='Original Script Source:'; dialogDiv.appendChild(label);
                 const textarea=document.createElement('textarea'); textarea.rows=15; textarea.placeholder="// ==UserScript==..."; textarea.style.width='100%';
-                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9.11\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
+                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9.13\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
                 let prefillIIFE = '(async function() { /* Paste IIFE body here */ })();';
                 try {
                     if (document.currentScript && document.currentScript.textContent) {
