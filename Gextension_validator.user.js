@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
 // @namespace    http://tampermonkey.net/
-// @version      0.3.6
+// @version      0.3.7
 // @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection (auto-reloads with instrumented code), revert option, and Mermaid flow visualization.
 // @author       ZLudany (enhanced by AI)
 // @match        https://home.google.com/*
@@ -9,13 +9,11 @@
 // @connect      huggingface.co        // Common CDN for WebLLM models
 // @connect      *.mlc.ai              // Official MLC CDNs for models and wasm
 // @connect      cdnjs.cloudflare.com  // For Acorn, Escodegen, ESTraverse
-// @grant        GM_setClipboard       // Optional: For easily copying modified code
-// @date         2023-10-28T15:00:00+00:00
 // ==/UserScript==
 
 // Top-level scope of the userscript
-const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_6';
-const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_6';
+const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_7';
+const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_7';
 let runOriginalScriptMainIIFE = true;
 
 if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
@@ -68,7 +66,8 @@ if (runOriginalScriptMainIIFE) {
         function getFunc(f){
             if (typeof f !== 'function') { return null; }
             return f.name ? f.name : (f.toString().match(/(function)(\s+)(\w+)(\()/)?.[3] || 'anonymous');
-        }window.ZLU.getFunc = getFunc;
+        };
+        window.ZLU.getFunc = getFunc;
 
         function trace(logBefore = false, all = true){
             try {
@@ -96,7 +95,8 @@ if (runOriginalScriptMainIIFE) {
                 }
             } catch (e) { /* console.warn("Error in trace function:", e); */ }
             return null;
-        }window.ZLU.trace = trace;
+        };
+        window.ZLU.trace = trace;
 
         const loadedScripts = {};
         async function loadScript(url, id){
@@ -106,16 +106,20 @@ if (runOriginalScriptMainIIFE) {
                 script.src = url;
                 if (id) script.id = id;
                 script.onload = () => { console.log(`Script ${id || url} loaded successfully from ${url}.`); resolve(); };
-                script.onerror = (err) => { console.error(`Failed to load script ${id || url} from ${url}:`, err); delete loadedScripts[id || url]; reject(err); };
+                script.onerror = (event) => { // event is an Event object
+                    console.error(`Failed to load script ${id || url} from ${url}:`, event);
+                    delete loadedScripts[id || url];
+                    reject(new Error(`Failed to load script ${id || url}. See console for details.`)); // Reject with a proper Error object
+                };
                 document.head.appendChild(script);
             });
             loadedScripts[id || url] = promise;
             return promise;
-        }async function loadWebLLMScript(url){
+        };
+        async function loadWebLLMScript(url){
             if (typeof window.webLLM !== 'undefined') { console.log('WebLLM library already loaded.'); return Promise.resolve(); }
             return loadScript(url, 'webllm-library');
-        }
-
+        };
         const ACORN_WORKER_SOURCE = `
 self.onmessage = async (event) => {
     const { sourceCode, acornPath, escodegenPath, estraversePath, functionsToIgnore } = event.data;
@@ -162,7 +166,6 @@ self.onmessage = async (event) => {
                             arguments: traceCallArguments
                         }
                     };
-                    
                     if (node.body.type === 'BlockStatement') {
                         node.body.body.unshift(traceCallStatement);
                     } else {
@@ -199,9 +202,8 @@ self.onmessage = async (event) => {
                 acornWorker = new Worker(workerUrl);
             }
             return acornWorker;
-        }
-
-        class JSCodeAnalyzer {
+        };
+        class JSCodeAnalyzer{
             constructor(modelId = DEFAULT_MODEL_ID, progressCallback = null){
                 this.modelId = modelId;
                 this.chatWorkerClient = null;
@@ -265,10 +267,11 @@ self.onmessage = async (event) => {
                 }
                 this.initializationInProgress = false; this.initializationPromise = null;
             }
-        }window.ZLU.JSCodeAnalyzer = JSCodeAnalyzer;
+        };
+        window.ZLU.JSCodeAnalyzer = JSCodeAnalyzer;
 
-        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.6): Running INSTRUMENTED version."); }
-        else { console.log("JSCodeAnalyzer (V0.3.6): Running ORIGINAL version."); }
+        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.7): Running INSTRUMENTED version."); }
+        else { console.log("JSCodeAnalyzer (V0.3.7): Running ORIGINAL version."); }
         console.log(`Default model for analysis: ${DEFAULT_MODEL_ID}`);
 
         async function runAnalyzerDemo(){
@@ -278,9 +281,9 @@ self.onmessage = async (event) => {
             const contentArea = document.createElement('div'); contentArea.style.cssText = 'display: flex; flex-direction: row; margin-top: 10px; gap: 10px; flex-grow: 1; max-height: 400px;'; demoUiContainer.appendChild(contentArea);
             const mermaidContainer = document.createElement('div'); mermaidContainer.id = 'analyzer-mermaid-diagram'; mermaidContainer.style.cssText = `flex: 1; border: 1px solid #ddd; background: #fff; padding: 10px; overflow: auto; min-width: 300px;`; contentArea.appendChild(mermaidContainer);
             const analysisResultPre = document.createElement('pre'); analysisResultPre.id = 'analyzer-result-pre'; analysisResultPre.style.cssText = `flex: 2; padding: 10px; border: 1px solid #ddd; background: #fff; max-height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;`; contentArea.appendChild(analysisResultPre);
-            function updateProgress(report){ const span = progressDisplay.querySelector('span'); const bar = progressDisplay.querySelector('div'); if (span) span.textContent = `${report.text}`; if (bar) { bar.style.width = `${report.progress * 100}%`; if (report.text.toLowerCase().includes("error")) bar.style.backgroundColor = "red"; else if (report.progress === 1 && !report.text.toLowerCase().includes("error")) bar.style.backgroundColor = "lightgreen"; else bar.style.backgroundColor = "lightblue"; } }
-            const criticalKeywordsArray=["critical security issue:", "major privacy concern:", "security vulnerability", "privacy violation", "data leak", "exploit", "rce", "xss", "sql injection"]; // Defined correctly
-            function checkForCriticalIssues(llmOutput){ for (const keyword of criticalKeywordsArray) { if (llmOutput.toLowerCase().includes(keyword.toLowerCase())) return true; } return false; }
+            function updateProgress(report){ const span = progressDisplay.querySelector('span'); const bar = progressDisplay.querySelector('div'); if (span) span.textContent = `${report.text}`; if (bar) { bar.style.width = `${report.progress * 100}%`; if (report.text.toLowerCase().includes("error")) bar.style.backgroundColor = "red"; else if (report.progress === 1 && !report.text.toLowerCase().includes("error")) bar.style.backgroundColor = "lightgreen"; else bar.style.backgroundColor = "lightblue"; } };
+            const criticalKeywordsArray=["critical security issue:", "major privacy concern:", "security vulnerability", "privacy violation:", "data leak", "exploit", "rce", "xss", "sql injection"];
+            function checkForCriticalIssues(llmOutput){ for (const keyword of criticalKeywordsArray) { if (llmOutput.toLowerCase().includes(keyword.toLowerCase())) return true; } return false; };
             async function renderMermaidDiagram(){
                 if (window.ZLU.executionPaths.size === 0) { mermaidContainer.innerHTML = 'No execution paths recorded. Interact with page if instrumented.'; return; }
                 try {
@@ -290,7 +293,7 @@ self.onmessage = async (event) => {
                     mermaidDefinition += Array.from(edges).join('\n'); if (edges.size === 0 && window.ZLU.executionPaths.size > 0) { const singlePath = Array.from(window.ZLU.executionPaths)[0]; const singleId = singlePath.replace(/[^a-zA-Z0-9_]/g, '_') + '_0'; mermaidDefinition += `    ${singleId}[${JSON.stringify(singlePath)}];`; }
                     const { svg } = await window.mermaid.render('mermaid-graph-svg', mermaidDefinition); mermaidContainer.innerHTML = svg;
                 } catch (err) { console.error("Error rendering Mermaid:", err); mermaidContainer.innerHTML = `Error rendering diagram: ${err.message}`; }
-            }
+            };
             let analyzerInstance;
             try {
                 analyzerInstance = new window.ZLU.JSCodeAnalyzer(window.ZLU.DEFAULT_JS_ANALYZER_MODEL_ID, updateProgress); await analyzerInstance._ensureInitialized(); updateProgress({ progress: 1, text: 'Analyzer ready.' });
@@ -300,8 +303,7 @@ self.onmessage = async (event) => {
                 if (DEV_MODE && window.ZLU_INSTRUMENTED_ACTIVE === true) { await renderMermaidDiagram(); const refreshButton = document.createElement('button'); refreshButton.textContent = 'Refresh Diagram'; refreshButton.style.cssText='margin-top:5px;padding:5px;font-size:12px;'; refreshButton.onclick = renderMermaidDiagram; const hrElement=document.createElement('hr'); mermaidContainer.appendChild(hrElement); mermaidContainer.appendChild(refreshButton); }
                 else { mermaidContainer.textContent = 'Mermaid diagram active when script is instrumented.'; }
             } catch (error) { console.error("Analyzer Demo Error:", error); updateProgress({ progress: 1, text: `Demo Error: ${error.message}` }); analysisResultPre.textContent = `Error in demo: ${error.message}`; }
-        }
-
+        };
         function setupDevInstrumentationUI(){
             const devPanel = document.createElement('div'); devPanel.style.cssText = `position:fixed;top:50px;right:10px;z-index:10001;background:#e9ecef;padding:10px;border-radius:5px;border:1px solid #ced4da;display:flex;flex-direction:column;gap:8px;`;
             const statusDiv = document.createElement('div'); statusDiv.style.fontSize='12px'; statusDiv.style.fontWeight='bold'; devPanel.appendChild(statusDiv);
@@ -319,9 +321,9 @@ self.onmessage = async (event) => {
                 const paragraph=document.createElement('p'); paragraph.innerHTML=`Paste <strong>original userscript source</strong>. It's processed, stored, then page reloads.`; paragraph.style.fontSize='13px'; dialogDiv.appendChild(paragraph);
                 const label=document.createElement('label'); label.textContent='Original Script Source:'; dialogDiv.appendChild(label);
                 const textarea=document.createElement('textarea'); textarea.rows=15; textarea.placeholder="// ==UserScript==..."; textarea.style.width='100%';
-                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.6\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// @connect      cdnjs.cloudflare.com\n// @grant        GM_setClipboard\n// @date         2023-10-28T15:00:00+00:00\n// ==/UserScript==`; // Simplified example
+                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.7\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// @connect      cdnjs.cloudflare.com\n// ==/UserScript==`;
                 let prefillIIFE = '(async function() { /* Paste IIFE body here */ })();';
-                try { // Best effort prefill
+                try {
                     if (document.currentScript && document.currentScript.textContent) {
                         const currentScriptText = document.currentScript.textContent;
                         const headerMatch = currentScriptText.match(/\/\/ ==UserScript==[\s\S]*?\/\/ ==\/UserScript==/s);
@@ -347,13 +349,18 @@ self.onmessage = async (event) => {
                             else{alert(`Instrumentation Error:\n${e.data.error}\nPage won't reload.`);processBtn.textContent='Process, Store & Reload';processBtn.disabled=false;closeBtn.disabled=false;}
                         };
                         worker.onerror=(err)=>{alert(`Worker Error:\n${err.message}\nPage won't reload.`);processBtn.textContent='Process, Store & Reload';processBtn.disabled=false;closeBtn.disabled=false;};
-                        const functionsToIgnoreList=['trace','getFunc','loadScript','loadWebLLMScript','_initialize','_ensureInitialized','analyze','resetChat','dispose','runAnalyzerDemo','updateProgress','checkForCriticalIssues','renderMermaidDiagram','setupDevInstrumentationUI','initializeApp','getAcornWorker']; // Correctly defined array
+                        const functionsToIgnoreList=['trace','getFunc','loadScript','loadWebLLMScript','_initialize','_ensureInitialized','analyze','resetChat','dispose','runAnalyzerDemo','updateProgress','checkForCriticalIssues','renderMermaidDiagram','setupDevInstrumentationUI','initializeApp','getAcornWorker'];
                         worker.postMessage({sourceCode:sourceCodeToInstrument,acornPath:ACORN_CDN,escodegenPath:ESCODEGEN_CDN,estraversePath:ESTRAVERSE_CDN,functionsToIgnore:functionsToIgnoreList});
                     };
-                } catch(err){console.error("Dev UI setup error:",err);alert("Error loading dev tools: "+err.message);dialogDiv.remove();instrumentBtn.disabled=false;instrumentBtn.textContent=window.ZLU_INSTRUMENTED_ACTIVE===true?'Re-Instrument & Reload':'Instrument & Reload';}
+                } catch(err){
+                    console.error("Dev UI setup error:",err);
+                    alert("Error loading dev tools: " + (err && err.message ? err.message : "Unknown error")); // More robust error message
+                    dialogDiv.remove();
+                    instrumentBtn.disabled=false;
+                    instrumentBtn.textContent=window.ZLU_INSTRUMENTED_ACTIVE===true?'Re-Instrument & Reload':'Instrument & Reload';
+                }
             };
-        }
-
+        };
         const startDemoButton = document.createElement('button');
         startDemoButton.textContent = 'Start JS Analyzer Demo (loads ~4GB model)';
         startDemoButton.style.cssText = `position: fixed; top: 10px; right: 10px; z-index: 10000; padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;`;
@@ -362,8 +369,7 @@ self.onmessage = async (event) => {
         function initializeApp(){
             if (document.body) { document.body.appendChild(startDemoButton); if (DEV_MODE) setupDevInstrumentationUI(); }
             else { window.addEventListener('DOMContentLoaded', () => { document.body.appendChild(startDemoButton); if (DEV_MODE) setupDevInstrumentationUI(); }, {once: true}); }
-        }
-
+        };
         initializeApp();
 
     })(); // End of Main Userscript IIFE
