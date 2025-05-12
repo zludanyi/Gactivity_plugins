@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
 // @namespace    http://tampermonkey.net/
-// @version      0.3.9.14
-// @description  Analyzes JavaScript code using WebLLM. Dev mode instruments by regenerating full script, then main thread trims to UserScript header before eval. Worker dependencies pre-fetched.
+// @version      0.3.9.11
+// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection. Worker dependencies are pre-fetched and environment (window, module, exports, require including fs, path, ./package.json) are mocked for worker eval.
 // @author       ZLudany (enhanced by AI)
 // @match        https://home.google.com/*
 // @connect      cdn.jsdelivr.net       // For WebLLM library, Mermaid, Acorn, Escodegen, ESTraverse, SourceMap, ESUtils
@@ -11,38 +11,27 @@
 // ==/UserScript==
 
 // Top-level scope of the userscript
-const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_14';
-const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_14';
+const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_11';
+const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_11';
 let runOriginalScriptMainIIFE = true;
 
 if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
-    const instrumentedCodeFromStorage = localStorage.getItem(INSTRUMENTED_CODE_KEY);
-    localStorage.removeItem(RELOAD_FLAG_KEY); // Clear main flag
-    if (instrumentedCodeFromStorage) {
+    const instrumentedCode = localStorage.getItem(INSTRUMENTED_CODE_KEY);
+    localStorage.removeItem(RELOAD_FLAG_KEY);
+    if (instrumentedCode) {
         console.log("JavaScript Code Analyzer: Attempting to load instrumented code from localStorage...");
-        let codeToExecute = instrumentedCodeFromStorage;
-        const userscriptHeaderMarker = "// ==UserScript==";
-        const headerIndex = instrumentedCodeFromStorage.indexOf(userscriptHeaderMarker);
-
-        if (headerIndex !== -1) {
-            codeToExecute = instrumentedCodeFromStorage.substring(headerIndex);
-            console.log("JavaScript Code Analyzer: Trimmed instrumented code to start from UserScript header for execution.");
-        } else {
-            console.warn("JavaScript Code Analyzer: UserScript header not found in stored instrumented code. Executing as is. This might lead to errors if a wrapper was included and mangled.");
-        }
-
         try {
-            new Function(codeToExecute)(); // Execute the (potentially trimmed) code
+            new Function(instrumentedCode)();
             if (window.ZLU_INSTRUMENTED_ACTIVE === true) {
                 console.log("JavaScript Code Analyzer: Instrumented code has set its flag. Halting original script's main IIFE execution.");
                 runOriginalScriptMainIIFE = false;
             } else {
                 console.warn("JavaScript Code Analyzer: Instrumented code executed, but ZLU_INSTRUMENTED_ACTIVE flag not set. Original script will proceed.");
-                localStorage.removeItem(INSTRUMENTED_CODE_KEY); // Clear potentially faulty code
+                localStorage.removeItem(INSTRUMENTED_CODE_KEY);
                 delete window.ZLU_INSTRUMENTED_ACTIVE;
             }
         } catch (e) {
-            console.error("JavaScript Code Analyzer: Error executing instrumented code (after potential trim):", e);
+            console.error("JavaScript Code Analyzer: Error executing instrumented code:", e);
             alert("Error executing instrumented code. Check console. Original script will load. Instrumented code and related flags will be cleared.");
             delete window.ZLU_INSTRUMENTED_ACTIVE;
             localStorage.removeItem(INSTRUMENTED_CODE_KEY);
@@ -54,7 +43,6 @@ if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
     localStorage.removeItem(RELOAD_FLAG_KEY + '_marker');
     localStorage.removeItem(RELOAD_FLAG_KEY + '_just_reloaded_for_instrumentation');
 }
-
 
 if (runOriginalScriptMainIIFE) {
     (async function() { // Main Userscript IIFE
@@ -167,32 +155,63 @@ self.onmessage = async (event) => {
 
     try {
         self.window = self; 
+
+        // Temporary storage for eval'd sub-modules, especially for esutils' parts
         const tempModules = {};
+
         self.require = function(moduleName) {
             console.log("Worker: Mock require called for:", moduleName);
             if (moduleName === 'fs') { console.warn("Worker: Mocked 'fs' module requested. Returning empty object."); return {}; }
             if (moduleName === 'path') { console.warn("Worker: Mocked 'path' module requested. Returning empty object."); return {}; }
-            if (moduleName === './package.json') { console.warn("Worker: Mocked './package.json' module requested."); return { version: 'mocked-version-for-worker' };}
+            if (moduleName === './package.json') { // Handle require('./package.json')
+                console.warn("Worker: Mocked './package.json' module requested.");
+                return { version: 'mocked-version' }; // Common use case is to get version
+            }
+            
+            // For esutils internal requires
             if (moduleName === './ast' && tempModules.esutils_ast) return tempModules.esutils_ast;
             if (moduleName === './code' && tempModules.esutils_code) return tempModules.esutils_code;
             if (moduleName === './keyword' && tempModules.esutils_keyword) return tempModules.esutils_keyword;
+            
+            // For direct requires of main modules
             if (moduleName === 'source-map' && (typeof self.sourceMap === 'object' || typeof self.sourceMap === 'function')) return self.sourceMap;
             if (moduleName === 'estraverse' && (typeof self.estraverse === 'object' || typeof self.estraverse === 'function')) return self.estraverse;
             if (moduleName === 'esutils' && (typeof self.esutils === 'object' || typeof self.esutils === 'function')) return self.esutils;
-            if (typeof originalRequire === 'function') { return originalRequire.apply(this, arguments); }
+            
+            if (typeof originalRequire === 'function') {
+                return originalRequire.apply(this, arguments);
+            }
             console.error("Worker: Mock require cannot resolve module:", moduleName);
             throw new Error("Worker: Mock require cannot resolve module: " + moduleName);
         };
-        var module, exports; // Declare for function scope within evalLibrary
+        
+        var module, exports;
 
         function evalLibrary(code, libName, selfPropertyName, tempModuleStoreName) {
             if (code && (typeof self[selfPropertyName] === 'undefined' && (tempModuleStoreName ? typeof tempModules[tempModuleStoreName] === 'undefined' : true))) {
                 console.log(\`Worker: Evaluating \${libName} code...\`);
-                module = { exports: {} }; exports = module.exports; eval(code);
+                module = { exports: {} }; 
+                exports = module.exports;
+                eval(code);
+                
                 let assignedExport = null;
-                if ((typeof module.exports === 'object' || typeof module.exports === 'function') && Object.keys(module.exports).length > 0) { assignedExport = module.exports; }
-                if (tempModuleStoreName) { tempModules[tempModuleStoreName] = assignedExport || {}; console.log(\`Worker: \${libName} stored in tempModules.\${tempModuleStoreName}. Type: \`, typeof tempModules[tempModuleStoreName]); }
-                else if (selfPropertyName) { if (typeof self[selfPropertyName] === 'undefined' && assignedExport) { self[selfPropertyName] = assignedExport; } console.log(\`Worker: \${libName} evaluated. Type of self.\${selfPropertyName}: \`, typeof self[selfPropertyName]); if (typeof self[selfPropertyName] !== 'object' && typeof self[selfPropertyName] !== 'function') { console.warn(\`Worker: self.\${selfPropertyName} might not be correctly set after \${libName} eval for '\${libName}'.\`); } }
+                if ((typeof module.exports === 'object' || typeof module.exports === 'function') && Object.keys(module.exports).length > 0) {
+                    assignedExport = module.exports;
+                }
+
+                if (tempModuleStoreName) {
+                    tempModules[tempModuleStoreName] = assignedExport || {};
+                    console.log(\`Worker: \${libName} stored in tempModules.\${tempModuleStoreName}. Type: \`, typeof tempModules[tempModuleStoreName]);
+
+                } else if (selfPropertyName) {
+                     if (typeof self[selfPropertyName] === 'undefined' && assignedExport) {
+                        self[selfPropertyName] = assignedExport;
+                     }
+                     console.log(\`Worker: \${libName} evaluated. Type of self.\${selfPropertyName}: \`, typeof self[selfPropertyName]);
+                     if (typeof self[selfPropertyName] !== 'object' && typeof self[selfPropertyName] !== 'function') {
+                         console.warn(\`Worker: self.\${selfPropertyName} might not be correctly set after \${libName} eval for '\${libName}'.\`);
+                     }
+                }
             }
         }
 
@@ -200,7 +219,7 @@ self.onmessage = async (event) => {
         evalLibrary(esutilsAstCode, "ESUtils AST", null, "esutils_ast");
         evalLibrary(esutilsCodeCode, "ESUtils Code", null, "esutils_code");
         evalLibrary(esutilsKeywordCode, "ESUtils Keyword", null, "esutils_keyword");
-        evalLibrary(esutilsMainCode, "ESUtils Main (utils.js)", "esutils"); // This should now work
+        evalLibrary(esutilsMainCode, "ESUtils Main (utils.js)", "esutils");
 
         evalLibrary(estraverseCode, "EStraverse", "estraverse");
         evalLibrary(acornCode, "Acorn", "acorn");
@@ -210,10 +229,7 @@ self.onmessage = async (event) => {
             throw new Error("Worker: One or more AST libraries (Acorn, Escodegen, Estraverse) are not available on self after eval.");
         }
 
-        // The worker will parse the entire sourceCode string it receives.
-        // The main thread will handle trimming any Tampermonkey wrapper before new Function().
         const ast = self.acorn.parse(sourceCode, { ecmaVersion: 'latest', sourceType: 'script', locations: false });
-        
         self.estraverse.replace(ast, {
             enter: function (node) {
                 if (node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression') {
@@ -237,21 +253,13 @@ self.onmessage = async (event) => {
                 return node;
             }
         });
-        let modifiedCode = self.escodegen.generate(ast); // This is the full source code, instrumented.
-        
-        // Inject ZLU_INSTRUMENTED_ACTIVE flag. Try to put it inside the main userscript IIFE.
-        // This regex targets '(async function() { 'use strict';'
-        const userscriptIifeStartRegex = /(\(\s*async\s+function\s*\(\s*\)\s*\{\s*['"]use strict['"];)/m;
-        if (userscriptIifeStartRegex.test(modifiedCode)) {
-             // Correctly escape newline for insertion into a JS string by replace.
-             const injection = "$1\\\\n    window.ZLU_INSTRUMENTED_ACTIVE = true;\\\\n    console.log('Instrumented version: ZLU_INSTRUMENTED_ACTIVE set from within userscript IIFE.');";
-             modifiedCode = modifiedCode.replace(userscriptIifeStartRegex, injection);
+        let modifiedCode = self.escodegen.generate(ast);
+        const iifeStartRegex = /(\\(\\s*async\\s+function\\s*\\(\\s*\\)\\s*\\{\\s*['"]use strict['"];)/m;
+        if (iifeStartRegex.test(modifiedCode)) {
+            modifiedCode = modifiedCode.replace(iifeStartRegex, "$1\\\\n    window.ZLU_INSTRUMENTED_ACTIVE = true;\\\\n    console.log('Instrumented version: ZLU_INSTRUMENTED_ACTIVE set from within instrumented code.');");
         } else {
-            // Fallback if the specific IIFE pattern isn't found (e.g. if user script isn't wrapped in this IIFE)
-            // Prepend it to the whole script. This is less ideal but better than not setting it.
-            modifiedCode = "window.ZLU_INSTRUMENTED_ACTIVE = true; console.log('Instrumented version: ZLU_INSTRUMENTED_ACTIVE set globally in instrumented code.');\\n" + modifiedCode;
+            modifiedCode = "window.ZLU_INSTRUMENTED_ACTIVE = true;\\\\nconsole.log('Instrumented version: ZLU_INSTRUMENTED_ACTIVE set globally as IIFE not detected.');\\\\n" + modifiedCode;
         }
-        
         self.postMessage({ success: true, modifiedCode: modifiedCode });
 
     } catch (error) {
@@ -382,8 +390,8 @@ self.onmessage = async (event) => {
         };
         window.ZLU.JSCodeAnalyzer = JSCodeAnalyzer;
 
-        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9.14): Running INSTRUMENTED version."); }
-        else { console.log("JSCodeAnalyzer (V0.3.9.14): Running ORIGINAL version."); }
+        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9.11): Running INSTRUMENTED version."); }
+        else { console.log("JSCodeAnalyzer (V0.3.9.11): Running ORIGINAL version."); }
         console.log(`Default model for analysis: ${DEFAULT_MODEL_ID}`);
 
         async function runAnalyzerDemo(){
@@ -434,7 +442,7 @@ self.onmessage = async (event) => {
                 const paragraph=document.createElement('p'); paragraph.innerHTML=`Paste <strong>original userscript source</strong>. It's processed, stored, then page reloads.`; paragraph.style.fontSize='13px'; dialogDiv.appendChild(paragraph);
                 const label=document.createElement('label'); label.textContent='Original Script Source:'; dialogDiv.appendChild(label);
                 const textarea=document.createElement('textarea'); textarea.rows=15; textarea.placeholder="// ==UserScript==..."; textarea.style.width='100%';
-                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9.14\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
+                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9.11\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
                 let prefillIIFE = '(async function() { /* Paste IIFE body here */ })();';
                 try {
                     if (document.currentScript && document.currentScript.textContent) {
