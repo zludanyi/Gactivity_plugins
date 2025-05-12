@@ -1,19 +1,18 @@
 // ==UserScript==
 // @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
 // @namespace    http://tampermonkey.net/
-// @version      0.3.8
-// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection (auto-reloads with instrumented code), revert option, and Mermaid flow visualization.
+// @version      0.3.9
+// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection (auto-reloads with instrumented code), revert option, and Mermaid flow visualization. Worker dependencies are pre-fetched by main thread.
 // @author       ZLudany (enhanced by AI)
 // @match        https://home.google.com/*
 // @connect      cdn.jsdelivr.net       // For WebLLM library, Mermaid, Acorn, Escodegen, ESTraverse
 // @connect      huggingface.co        // Common CDN for WebLLM models
 // @connect      *.mlc.ai              // Official MLC CDNs for models and wasm
-// @connect      cdnjs.cloudflare.com  // Fallback or other libraries
 // ==/UserScript==
 
 // Top-level scope of the userscript
-const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_8';
-const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_8';
+const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9';
+const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9';
 let runOriginalScriptMainIIFE = true;
 
 if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
@@ -62,6 +61,7 @@ if (runOriginalScriptMainIIFE) {
         }
         window.ZLU.executionPaths = window.ZLU.executionPaths || new Set();
         window.ZLU.DEFAULT_JS_ANALYZER_MODEL_ID = DEFAULT_MODEL_ID;
+        window.ZLU.fetchedLibraryCode = null; // To store pre-fetched library code for the worker
 
         function getFunc(f){
             if (typeof f !== 'function') { return null; }
@@ -99,7 +99,7 @@ if (runOriginalScriptMainIIFE) {
         window.ZLU.trace = trace;
 
         const loadedScripts = {};
-        async function loadScript(url, id){
+        async function loadScript(url, id){ // For <script> tag injection
             if (loadedScripts[id || url]) { return loadedScripts[id || url]; }
             const promise = new Promise((resolve, reject) => {
                 const script = document.createElement('script');
@@ -116,17 +116,50 @@ if (runOriginalScriptMainIIFE) {
             loadedScripts[id || url] = promise;
             return promise;
         };
+
+        async function fetchScriptAsText(url, name){
+            console.log(`Fetching script content for ${name} from ${url}`);
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP error ${response.status} fetching ${name} from ${url}`);
+                }
+                const text = await response.text();
+                console.log(`Successfully fetched script content for ${name}. Length: ${text.length}`);
+                return text;
+            } catch (error) {
+                console.error(`Error fetching script content for ${name} from ${url}:`, error);
+                throw error;
+            }
+        };
+
         async function loadWebLLMScript(url){
             if (typeof window.webLLM !== 'undefined') { console.log('WebLLM library already loaded.'); return Promise.resolve(); }
             return loadScript(url, 'webllm-library');
         };
         const ACORN_WORKER_SOURCE = `
 self.onmessage = async (event) => {
-    const { sourceCode, acornPath, escodegenPath, estraversePath, functionsToIgnore } = event.data;
+    const { sourceCode, acornCode, escodegenCode, estraverseCode, functionsToIgnore } = event.data;
     try {
-        if (!self.acorn) await importScripts(acornPath);
-        if (!self.escodegen) await importScripts(escodegenPath);
-        if (!self.estraverse) await importScripts(estraversePath);
+        if (acornCode && !self.acorn) {
+            console.log("Worker: Evaluating Acorn code...");
+            eval(acornCode);
+            console.log("Worker: Acorn evaluated.", typeof self.acorn);
+        }
+        if (escodegenCode && !self.escodegen) {
+            console.log("Worker: Evaluating Escodegen code...");
+            eval(escodegenCode);
+            console.log("Worker: Escodegen evaluated.", typeof self.escodegen);
+        }
+        if (estraverseCode && !self.estraverse) {
+            console.log("Worker: Evaluating EStraverse code...");
+            eval(estraverseCode);
+            console.log("Worker: EStraverse evaluated.", typeof self.estraverse);
+        }
+
+        if (!self.acorn || !self.escodegen || !self.estraverse) {
+            throw new Error("Worker: One or more AST libraries failed to evaluate/initialize after being passed as code strings.");
+        }
 
         const ast = self.acorn.parse(sourceCode, { ecmaVersion: 'latest', sourceType: 'script', locations: false });
 
@@ -134,26 +167,17 @@ self.onmessage = async (event) => {
             enter: function (node) {
                 if (node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression') {
                     let functionName = '';
-                    if (node.id && node.id.name) {
-                        functionName = node.id.name;
-                    } else if (node.parent && node.parent.type === 'VariableDeclarator' && node.parent.id.name) {
-                        functionName = node.parent.id.name;
-                    } else if (node.parent && node.parent.type === 'MethodDefinition' && node.parent.key.name) {
-                        functionName = node.parent.key.name;
-                    } else if (node.parent && node.parent.type === 'Property' && node.parent.key.name) {
-                        functionName = node.parent.key.name;
-                    }
+                    if (node.id && node.id.name) { functionName = node.id.name; }
+                    else if (node.parent && node.parent.type === 'VariableDeclarator' && node.parent.id.name) { functionName = node.parent.id.name; }
+                    else if (node.parent && node.parent.type === 'MethodDefinition' && node.parent.key.name) { functionName = node.parent.key.name; }
+                    else if (node.parent && node.parent.type === 'Property' && node.parent.key.name) { functionName = node.parent.key.name; }
 
-                    if (functionsToIgnore && functionsToIgnore.includes(functionName)) {
-                        return node;
-                    }
+                    if (functionsToIgnore && functionsToIgnore.includes(functionName)) { return node; }
                     if (node.body && node.body.type === 'BlockStatement' && node.body.body && node.body.body.length > 0) {
                         const firstStmt = node.body.body[0];
-                        if (firstStmt.type === 'ExpressionStatement' &&
-                            firstStmt.expression.type === 'CallExpression' &&
+                        if (firstStmt.type === 'ExpressionStatement' && firstStmt.expression.type === 'CallExpression' &&
                             firstStmt.expression.callee.object && firstStmt.expression.callee.object.name === 'ZLU' &&
-                            firstStmt.expression.callee.property && firstStmt.expression.callee.property.name === 'trace'
-                        ) {
+                            firstStmt.expression.callee.property && firstStmt.expression.callee.property.name === 'trace') {
                             return node;
                         }
                     }
@@ -170,10 +194,7 @@ self.onmessage = async (event) => {
                         node.body.body.unshift(traceCallStatement);
                     } else {
                         const newBodyContent = [traceCallStatement, { type: 'ReturnStatement', argument: node.body }];
-                        node.body = {
-                            type: 'BlockStatement',
-                            body: newBodyContent
-                        };
+                        node.body = { type: 'BlockStatement', body: newBodyContent };
                     }
                 }
                 return node;
@@ -188,23 +209,45 @@ self.onmessage = async (event) => {
         }
         self.postMessage({ success: true, modifiedCode: modifiedCode });
     } catch (error) {
-        console.error("Acorn Worker Error (inside worker onmessage):", error); // Added more specific log
+        console.error("Acorn Worker Error (inside worker onmessage):", error);
         self.postMessage({ success: false, error: "Worker script loading/processing error: " + error.message + (error.stack ? '\\\\n' + error.stack : '') });
     }
 };
 `;
         let acornWorker = null;
-        async function getAcornWorker(){
+        async function ensureFetchedLibraryCode(){
+            if (!window.ZLU.fetchedLibraryCode) {
+                console.log("Pre-fetching AST libraries for worker...");
+                try {
+                    const [acornCode, escodegenCode, estraverseCode] = await Promise.all([
+                        fetchScriptAsText(ACORN_CDN, "Acorn"),
+                        fetchScriptAsText(ESCODEGEN_CDN, "Escodegen"),
+                        fetchScriptAsText(ESTRAVERSE_CDN, "Estraverse")
+                    ]);
+                    window.ZLU.fetchedLibraryCode = { acornCode, escodegenCode, estraverseCode };
+                    console.log("AST libraries pre-fetched successfully.");
+                } catch (error) {
+                    console.error("Failed to pre-fetch one or more AST libraries for worker:", error);
+                    window.ZLU.fetchedLibraryCode = null;
+                    throw error;
+                }
+            }
+            if (!window.ZLU.fetchedLibraryCode || !window.ZLU.fetchedLibraryCode.acornCode || !window.ZLU.fetchedLibraryCode.escodegenCode || !window.ZLU.fetchedLibraryCode.estraverseCode) {
+                throw new Error("One or more AST libraries could not be fetched or were empty.");
+            }
+            return window.ZLU.fetchedLibraryCode;
+        };
+
+        async function getAcornWorkerInstance(){
             if (!acornWorker) {
-                // Removed Promise.all for Acorn/Escodegen/Estraverse here as they are loaded by worker via importScripts.
-                // Main thread does not directly use them.
                 try {
                     const blob = new Blob([ACORN_WORKER_SOURCE], { type: 'application/javascript' });
                     const workerUrl = URL.createObjectURL(blob);
                     acornWorker = new Worker(workerUrl);
+                    console.log("AcornWorker instance created from blob.");
                 } catch (e) {
-                    console.error("Error creating Acorn worker blob/URL:", e);
-                    throw e; // Re-throw to be caught by setupDevInstrumentationUI
+                    console.error("Error creating Acorn worker from blob/URL:", e);
+                    throw e;
                 }
             }
             return acornWorker;
@@ -276,8 +319,8 @@ self.onmessage = async (event) => {
         };
         window.ZLU.JSCodeAnalyzer = JSCodeAnalyzer;
 
-        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.8): Running INSTRUMENTED version."); }
-        else { console.log("JSCodeAnalyzer (V0.3.8): Running ORIGINAL version."); }
+        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9): Running INSTRUMENTED version."); }
+        else { console.log("JSCodeAnalyzer (V0.3.9): Running ORIGINAL version."); }
         console.log(`Default model for analysis: ${DEFAULT_MODEL_ID}`);
 
         async function runAnalyzerDemo(){
@@ -320,14 +363,15 @@ self.onmessage = async (event) => {
                 devPanel.appendChild(revertBtn);
             } else { statusDiv.textContent = 'Status: Running original version.'; statusDiv.style.color = 'green'; }
             const instrumentBtn = document.createElement('button'); instrumentBtn.textContent = window.ZLU_INSTRUMENTED_ACTIVE === true ? 'Re-Instrument & Reload Script' : 'Instrument & Reload Script'; instrumentBtn.title='Modifies userscript with trace calls, reloads page.'; instrumentBtn.style.cssText=`padding:8px 12px;background-color:#ffc107;color:black;border:none;border-radius:5px;cursor:pointer;font-size:12px;`; devPanel.appendChild(instrumentBtn); document.body.appendChild(devPanel);
+
             instrumentBtn.onclick = async () => {
-                instrumentBtn.disabled=true; instrumentBtn.textContent='Preparing...';
+                instrumentBtn.disabled=true; instrumentBtn.textContent='Fetching libs & Preparing UI...';
                 const dialogDiv = document.createElement('div'); dialogDiv.style.cssText=`position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:white;border:1px solid #ccc;border-radius:8px;padding:20px;z-index:10002;box-shadow:0 0 15px rgba(0,0,0,0.3);width:80vw;max-width:800px;display:flex;flex-direction:column;gap:10px;`;
                 const heading=document.createElement('h4'); heading.textContent='Script Instrumentation & Reload'; heading.style.margin='0 0 10px 0'; dialogDiv.appendChild(heading);
                 const paragraph=document.createElement('p'); paragraph.innerHTML=`Paste <strong>original userscript source</strong>. It's processed, stored, then page reloads.`; paragraph.style.fontSize='13px'; dialogDiv.appendChild(paragraph);
                 const label=document.createElement('label'); label.textContent='Original Script Source:'; dialogDiv.appendChild(label);
                 const textarea=document.createElement('textarea'); textarea.rows=15; textarea.placeholder="// ==UserScript==..."; textarea.style.width='100%';
-                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.8\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// @connect      cdnjs.cloudflare.com\n// ==/UserScript==`;
+                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
                 let prefillIIFE = '(async function() { /* Paste IIFE body here */ })();';
                 try {
                     if (document.currentScript && document.currentScript.textContent) {
@@ -343,10 +387,14 @@ self.onmessage = async (event) => {
                 } catch(e) { console.warn("Error during prefill attempt:", e); }
                 textarea.value = prefillHeader + "\n\n" + prefillIIFE;
                 dialogDiv.appendChild(textarea);
-                const processBtn=document.createElement('button'); processBtn.textContent='Process, Store & Reload'; dialogDiv.appendChild(processBtn);
+                const processBtn=document.createElement('button'); processBtn.textContent='Process, Store & Reload'; processBtn.disabled = true; dialogDiv.appendChild(processBtn);
                 const closeBtn=document.createElement('button'); closeBtn.textContent='Cancel'; closeBtn.onclick=()=>{dialogDiv.remove();instrumentBtn.disabled=false;instrumentBtn.textContent=window.ZLU_INSTRUMENTED_ACTIVE===true?'Re-Instrument & Reload':'Instrument & Reload';}; dialogDiv.appendChild(closeBtn); document.body.appendChild(dialogDiv);
                 try {
-                    const worker=await getAcornWorker(); instrumentBtn.textContent=window.ZLU_INSTRUMENTED_ACTIVE===true?'Re-Instrument & Reload':'Instrument & Reload'; processBtn.disabled=false;
+                    await ensureFetchedLibraryCode(); // Fetch libraries first
+                    const worker = await getAcornWorkerInstance(); // Then get/create worker
+
+                    instrumentBtn.textContent=window.ZLU_INSTRUMENTED_ACTIVE===true?'Re-Instrument & Reload Script':'Instrument & Reload Script'; // Reset button text
+                    processBtn.disabled=false; // Enable process button now
                     processBtn.onclick = async () => {
                         const sourceCodeToInstrument=textarea.value; if(!sourceCodeToInstrument.trim()||!sourceCodeToInstrument.includes("// ==UserScript==")||!sourceCodeToInstrument.includes("async function()")){alert("Paste full valid userscript.");return;}
                         processBtn.textContent='Processing...';processBtn.disabled=true;closeBtn.disabled=true;
@@ -355,13 +403,19 @@ self.onmessage = async (event) => {
                             else{alert(`Instrumentation Error:\n${e.data.error}\nPage won't reload.`);processBtn.textContent='Process, Store & Reload';processBtn.disabled=false;closeBtn.disabled=false;}
                         };
                         worker.onerror=(err)=>{alert(`Worker Error:\n${err.message}\nPage won't reload.`);processBtn.textContent='Process, Store & Reload';processBtn.disabled=false;closeBtn.disabled=false;};
-                        const functionsToIgnoreList=['trace','getFunc','loadScript','loadWebLLMScript','_initialize','_ensureInitialized','analyze','resetChat','dispose','runAnalyzerDemo','updateProgress','checkForCriticalIssues','renderMermaidDiagram','setupDevInstrumentationUI','initializeApp','getAcornWorker'];
-                        worker.postMessage({sourceCode:sourceCodeToInstrument,acornPath:ACORN_CDN,escodegenPath:ESCODEGEN_CDN,estraversePath:ESTRAVERSE_CDN,functionsToIgnore:functionsToIgnoreList});
+                        const functionsToIgnoreList=['trace','getFunc','loadScript','loadWebLLMScript','_initialize','_ensureInitialized','analyze','resetChat','dispose','runAnalyzerDemo','updateProgress','checkForCriticalIssues','renderMermaidDiagram','setupDevInstrumentationUI','initializeApp','getAcornWorkerInstance', 'ensureFetchedLibraryCode', 'fetchScriptAsText'];
+                        worker.postMessage({
+                            sourceCode:sourceCodeToInstrument,
+                            acornCode: window.ZLU.fetchedLibraryCode.acornCode,
+                            escodegenCode: window.ZLU.fetchedLibraryCode.escodegenCode,
+                            estraverseCode: window.ZLU.fetchedLibraryCode.estraverseCode,
+                            functionsToIgnore:functionsToIgnoreList
+                        });
                     };
                 } catch(err){
-                    console.error("Dev UI setup error (getAcornWorker related):",err);
-                    alert("Error loading dev tools: " + (err && err.message ? err.message : "Unknown error creating worker."));
-                    if (dialogDiv && dialogDiv.parentNode) dialogDiv.remove(); // Ensure dialog is removed on error
+                    console.error("Dev UI setup error (library fetching or worker creation):",err);
+                    alert("Error loading dev tools for instrumentation: " + (err && err.message ? err.message : "Unknown error. Check console."));
+                    if (dialogDiv && dialogDiv.parentNode) dialogDiv.remove();
                     instrumentBtn.disabled=false;
                     instrumentBtn.textContent=window.ZLU_INSTRUMENTED_ACTIVE===true?'Re-Instrument & Reload':'Instrument & Reload';
                 }
