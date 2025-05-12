@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
 // @namespace    http://tampermonkey.net/
-// @version      0.3
-// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection (auto-reload) and Mermaid flow visualization.
+// @version      0.3.1
+// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection (auto-reloads with instrumented code) and Mermaid flow visualization.
 // @author       ZLudany (enhanced by AI)
 // @match        https://home.google.com/*
 // @connect      cdn.jsdelivr.net       // For WebLLM library, Mermaid, Acorn, Escodegen, ESTraverse
@@ -10,47 +10,35 @@
 // @connect      *.mlc.ai              // Official MLC CDNs for models and wasm
 // @connect      cdnjs.cloudflare.com  // For Acorn, Escodegen, ESTraverse
 // @grant        GM_setClipboard       // Optional: For easily copying modified code
-// @grant        GM_getValue           // Potentially for more robust storage if needed
-// @grant        GM_setValue           // Potentially for more robust storage if needed
-// @date         2023-10-28T12:00:00+00:00
+// @date         2023-10-28T12:30:00+00:00
 // ==/UserScript==
 
-const SCRIPT_CONTENT_STORAGE_KEY = 'jsAnalyzerInstrumentedContent_v1';
-const SCRIPT_IS_INSTRUMENTED_FLAG = 'jsAnalyzerIsInstrumented_v1';
-
-(async function UserscriptWrapper() {
+(async function() {
     'use strict';
-    if (localStorage.getItem(SCRIPT_IS_INSTRUMENTED_FLAG) === 'true') {
-        const instrumentedScriptContent = localStorage.getItem(SCRIPT_CONTENT_STORAGE_KEY);
-        if (instrumentedScriptContent) {
-            console.log('[JS Analyzer] Executing instrumented version from localStorage.');
+    const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_1';
+    const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_1';
+
+    if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
+        const instrumentedCode = localStorage.getItem(INSTRUMENTED_CODE_KEY);
+        localStorage.removeItem(RELOAD_FLAG_KEY);
+        localStorage.removeItem(INSTRUMENTED_CODE_KEY);
+        if (instrumentedCode) {
+            console.log("JavaScript Code Analyzer: Loading instrumented code from localStorage...");
             try {
-                await (new Function("'use strict';" + instrumentedScriptContent))();
+                new Function(instrumentedCode)();
+                return;
             } catch (e) {
-                console.error('[JS Analyzer] Error executing instrumented code. Clearing and reloading.', e);
-                localStorage.removeItem(SCRIPT_CONTENT_STORAGE_KEY);
-                localStorage.removeItem(SCRIPT_IS_INSTRUMENTED_FLAG);
-                location.reload();
+                console.error("JavaScript Code Analyzer: Error executing instrumented code:", e);
+                alert("Error executing instrumented code. Check console. The original script will load on the next refresh. The instrumented code will be discarded.");
             }
-            return;
-        } else {
-            console.warn('[JS Analyzer] Instrumentation flag set but no code found. Clearing and reloading.');
-            localStorage.removeItem(SCRIPT_IS_INSTRUMENTED_FLAG);
-            localStorage.removeItem(SCRIPT_CONTENT_STORAGE_KEY); // Clear both if inconsistent
-            location.reload();
-            return;
         }
     }
-    const coreLogicSource = runCoreLogic.toString();
-    const coreLogicBody = coreLogicSource.substring(coreLogicSource.indexOf('{') + 1, coreLogicSource.lastIndexOf('}')).trim();
-    await runCoreLogic(coreLogicBody);
-})();
 
-async function runCoreLogic(sourceBodyForInstrumentation = '') {
     // --- Global Configuration ---
     const DEV_MODE = true;
     const WEB_LLM_LIBRARY_SRC = 'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@latest/dist/web-llm.js';
     const DEFAULT_MODEL_ID = "Llama-3-8B-Instruct-q4f16_1";
+
     const ACORN_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/acorn/8.11.0/acorn.min.js';
     const ESCODEGEN_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/escodegen/2.1.0/escodegen.min.js';
     const ESTRAVERSE_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/estraverse/5.3.0/estraverse.min.js';
@@ -60,31 +48,34 @@ async function runCoreLogic(sourceBodyForInstrumentation = '') {
     if (typeof window.ZLU === 'undefined') {
         window.ZLU = {};
     }
-    if (!window.ZLU.executionPaths) {
-        window.ZLU.executionPaths = new Set();
-    }
+    window.ZLU.executionPaths = window.ZLU.executionPaths || new Set();
+    window.ZLU.DEFAULT_JS_ANALYZER_MODEL_ID = DEFAULT_MODEL_ID;
+
     // --- Tracing Utilities ---
-    function getFunc(f) {
+    function getFunc(f){
         if (typeof f !== 'function') {
             return null;
         }
         return f.name ? f.name : (f.toString().match(/(function)(\s+)(\w+)(\()/)?.[3] || 'anonymous');
-    }
-    window.ZLU.getFunc = getFunc;
-    function trace(logBefore = false, all = true) {
+    }window.ZLU.getFunc = getFunc;
+
+    function trace(logBefore = false, all = true){
         try {
             const maxDepth = 20;
             let currentFunc = logBefore ? arguments.callee.caller.caller : arguments.callee.caller;
             if (!currentFunc) {
                 return null;
             }
+
             const callChain = [];
             let depth = 0;
+
             while (currentFunc && depth < maxDepth) {
                 const funcName = getFunc(currentFunc);
                 if (funcName) {
                     callChain.push(funcName);
                 }
+
                 if (currentFunc.caller === currentFunc) {
                     callChain.push("recursive_self");
                     break;
@@ -98,9 +89,8 @@ async function runCoreLogic(sourceBodyForInstrumentation = '') {
                 currentFunc = currentFunc.caller;
                 depth++;
             }
-            if (depth === maxDepth) {
-                callChain.push("max_depth_reached");
-            }
+            if (depth === maxDepth) callChain.push("max_depth_reached");
+
             if (callChain.length > 0) {
                 const pathString = callChain.reverse().join(' -->> ');
                 window.ZLU.executionPaths.add(pathString);
@@ -110,21 +100,19 @@ async function runCoreLogic(sourceBodyForInstrumentation = '') {
             // console.warn("Error in trace function:", e);
         }
         return null;
-    }
-    window.ZLU.trace = trace;
+    }window.ZLU.trace = trace;
+
 
     // --- Helper to load external scripts ---
     const loadedScripts = {};
-    async function loadScript(url, id) {
+    async function loadScript(url, id){
         if (loadedScripts[id || url]) {
             return loadedScripts[id || url];
         }
         const promise = new Promise((resolve, reject) => {
             const script = document.createElement('script');
             script.src = url;
-            if (id) {
-                script.id = id;
-            }
+            if (id) script.id = id;
             script.onload = () => {
                 console.log(`Script ${id || url} loaded successfully from ${url}.`);
                 resolve();
@@ -138,14 +126,14 @@ async function runCoreLogic(sourceBodyForInstrumentation = '') {
         });
         loadedScripts[id || url] = promise;
         return promise;
-    }
-    async function loadWebLLMScript(url) {
+    }async function loadWebLLMScript(url){
         if (typeof window.webLLM !== 'undefined') {
             console.log('WebLLM library already loaded.');
             return Promise.resolve();
         }
         return loadScript(url, 'webllm-library');
     }
+
     // --- Acorn Worker Script (as a string) ---
     const ACORN_WORKER_SOURCE = `
         self.onmessage = async (event) => {
@@ -154,7 +142,9 @@ async function runCoreLogic(sourceBodyForInstrumentation = '') {
                 if (!self.acorn) await importScripts(acornPath);
                 if (!self.escodegen) await importScripts(escodegenPath);
                 if (!self.estraverse) await importScripts(estraversePath);
-                const ast = self.acorn.parse(sourceCode, { ecmaVersion: 'latest', sourceType: 'module', locations: false }); // Use module for broader compatibility
+
+                const ast = self.acorn.parse(sourceCode, { ecmaVersion: 'latest', sourceType: 'script', locations: false });
+
                 self.estraverse.replace(ast, {
                     enter: function (node) {
                         if (node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression') {
@@ -168,6 +158,7 @@ async function runCoreLogic(sourceBodyForInstrumentation = '') {
                             } else if (node.parent && node.parent.type === 'Property' && node.parent.key.name) {
                                 functionName = node.parent.key.name;
                             }
+
                             if (functionsToIgnore && functionsToIgnore.includes(functionName)) {
                                 return node;
                             }
@@ -180,6 +171,7 @@ async function runCoreLogic(sourceBodyForInstrumentation = '') {
                                     return node;
                                 }
                             }
+
                             const traceCallStatement = {
                                 type: 'ExpressionStatement',
                                 expression: {
@@ -191,6 +183,7 @@ async function runCoreLogic(sourceBodyForInstrumentation = '') {
                                     ]
                                 }
                             };
+
                             if (node.body.type === 'BlockStatement') {
                                 node.body.body.unshift(traceCallStatement);
                             } else {
@@ -201,21 +194,23 @@ async function runCoreLogic(sourceBodyForInstrumentation = '') {
                                         { type: 'ReturnStatement', argument: node.body }
                                     ]
                                 };
-                                node.expression = false; // Mark arrow function as no longer concise expression body
                             }
                         }
                         return node;
                     }
                 });
+
                 const modifiedCode = self.escodegen.generate(ast);
                 self.postMessage({ success: true, modifiedCode });
+
             } catch (error) {
                 console.error("Acorn Worker Error:", error);
                 self.postMessage({ success: false, error: error.message + (error.stack ? '\\n' + error.stack : '') });
             }
-    };`;
+        };
+    `;
     let acornWorker = null;
-    async function getAcornWorker() {
+    async function getAcornWorker(){
         if (!acornWorker) {
             await Promise.all([
                 loadScript(ACORN_CDN, 'acorn'),
@@ -228,20 +223,21 @@ async function runCoreLogic(sourceBodyForInstrumentation = '') {
         }
         return acornWorker;
     }
+
     // --- Main Userscript Class ---
     class JSCodeAnalyzer {
-        constructor(modelId = DEFAULT_MODEL_ID, progressCallback = null) {
+        constructor(modelId = DEFAULT_MODEL_ID, progressCallback = null){
             this.modelId = modelId;
             this.chatWorkerClient = null;
             this.initializationInProgress = false;
             this.initializationPromise = null;
-            this.progressCallback = progressCallback || function(report) {
+            this.progressCallback = progressCallback || function(report){
                 const progressPercentage = (report.progress * 100).toFixed(2);
                 console.log(`[JSCodeAnalyzer Worker Progress]: ${report.text} (${progressPercentage}%)`);
             };
             this.initializationPromise = this._initialize();
         }
-        async _initialize() {
+        async _initialize(){
             if (this.initializationInProgress || this.chatWorkerClient) {
                 return this.initializationPromise;
             }
@@ -270,7 +266,7 @@ async function runCoreLogic(sourceBodyForInstrumentation = '') {
                 this.initializationInProgress = false;
             }
         }
-        async _ensureInitialized() {
+        async _ensureInitialized(){
             if (!this.initializationPromise) {
                  console.warn("JSCodeAnalyzer initialization was not started. Attempting to initialize now.");
                  this.initializationPromise = this._initialize();
@@ -280,15 +276,18 @@ async function runCoreLogic(sourceBodyForInstrumentation = '') {
                 throw new Error("JSCodeAnalyzer failed to initialize or model is not loaded.");
             }
         }
-        async analyze(jsCode, analysisTaskPrompt, streamCallback = null) {
+        async analyze(jsCode, analysisTaskPrompt, streamCallback = null){
             await this._ensureInitialized();
             const fullPrompt = `You are an expert JavaScript code analysis assistant. Your task is to analyze the provided JavaScript code.
 Follow these instructions for the analysis: ${analysisTaskPrompt}
+
 Provide a detailed and structured analysis. If you identify any critical security issues or major privacy concerns, please state them clearly and begin those specific points with phrases like "CRITICAL SECURITY ISSUE:" or "MAJOR PRIVACY CONCERN:".
+
 JavaScript Code:
 \`\`\`javascript
 ${jsCode}
 \`\`\`
+
 Analysis:`;
             try {
                 let fullReply = "";
@@ -309,13 +308,11 @@ Analysis:`;
                 return fullReply;
             } catch (error) {
                 console.error("Error during code analysis:", error);
-                if (streamCallback) {
-                    streamCallback('error', error.message);
-                }
+                if (streamCallback) streamCallback('error', error.message);
                 throw error;
             }
         }
-        async resetChat() {
+        async resetChat(){
             await this._ensureInitialized();
             try {
                 await this.chatWorkerClient.resetChat();
@@ -325,7 +322,7 @@ Analysis:`;
                 console.error("Error resetting chat:", error);
             }
         }
-        async dispose() {
+        async dispose(){
             if (this.chatWorkerClient) {
                 try {
                     this.progressCallback({ progress: 0, text: 'Disposing JSCodeAnalyzer...' });
@@ -342,18 +339,19 @@ Analysis:`;
             this.initializationInProgress = false;
             this.initializationPromise = null;
         }
-    }
-    window.ZLU.JSCodeAnalyzer = JSCodeAnalyzer;
-    window.ZLU.DEFAULT_JS_ANALYZER_MODEL_ID = DEFAULT_MODEL_ID;
-    console.log("JSCodeAnalyzer class (V0.3) loaded. Access with `new ZLU.JSCodeAnalyzer()`.");
+    }window.ZLU.JSCodeAnalyzer = JSCodeAnalyzer;
+
+
+    console.log("JSCodeAnalyzer class (V0.3.1) loaded. Access with `new ZLU.JSCodeAnalyzer()`.");
     console.log(`Default model for analysis: ${DEFAULT_MODEL_ID}`);
-    if (localStorage.getItem(SCRIPT_IS_INSTRUMENTED_FLAG) === 'true') {
-      console.log('[JS Analyzer] Running INSTRUMENTED version.');
-    } else {
-      console.log('[JS Analyzer] Running ORIGINAL version.');
+    if (localStorage.getItem(RELOAD_FLAG_KEY + '_marker')) {
+        console.log("JSCodeAnalyzer: Running instrumented version.");
+        localStorage.removeItem(RELOAD_FLAG_KEY + '_marker');
     }
+
+
     // --- Example Usage (Demonstration) ---
-    async function runAnalyzerDemo() {
+    async function runAnalyzerDemo(){
         const demoUiContainer = document.createElement('div');
         demoUiContainer.id = 'js-analyzer-demo-ui';
         demoUiContainer.style.cssText = `
@@ -363,25 +361,35 @@ Analysis:`;
             font-family: Arial, sans-serif; font-size: 14px; display: flex; flex-direction: column;
         `;
         document.body.appendChild(demoUiContainer);
+
         const title = document.createElement('h3');
         title.textContent = 'JS Code Analyzer Demo';
+        if (localStorage.getItem(RELOAD_FLAG_KEY + '_just_reloaded_for_instrumentation')) {
+            title.textContent += ' (Instrumented)';
+            title.style.color = 'purple';
+            localStorage.removeItem(RELOAD_FLAG_KEY + '_just_reloaded_for_instrumentation');
+        }
         title.style.marginTop = '0';
         demoUiContainer.appendChild(title);
+
         const progressDisplay = document.createElement('div');
         progressDisplay.id = 'analyzer-progress-display';
         progressDisplay.innerHTML = '<span>Initializing...</span><div style="width: 0%; background: lightblue; height: 10px; margin-top: 5px; border-radius: 5px;"></div>';
         demoUiContainer.appendChild(progressDisplay);
+
         const contentArea = document.createElement('div');
         contentArea.style.cssText = 'display: flex; flex-direction: row; margin-top: 10px; gap: 10px; flex-grow: 1; max-height: 400px;';
         demoUiContainer.appendChild(contentArea);
+
         const mermaidContainer = document.createElement('div');
         mermaidContainer.id = 'analyzer-mermaid-diagram';
         mermaidContainer.style.cssText = `
             flex: 1; border: 1px solid #ddd; background: #fff; padding: 10px;
             overflow: auto; min-width: 300px;
         `;
-        mermaidContainer.textContent = 'Execution path diagram will appear here (if tracing is active).';
+        mermaidContainer.textContent = 'Execution path diagram will appear here (after instrumentation and interaction).';
         contentArea.appendChild(mermaidContainer);
+
         const analysisResultPre = document.createElement('pre');
         analysisResultPre.id = 'analyzer-result-pre';
         analysisResultPre.style.cssText = `
@@ -389,24 +397,21 @@ Analysis:`;
             max-height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
         `;
         contentArea.appendChild(analysisResultPre);
-        function updateProgress(report) {
+
+
+        function updateProgress(report){
             const span = progressDisplay.querySelector('span');
             const bar = progressDisplay.querySelector('div');
-            if (span) {
-                span.textContent = `${report.text}`;
-            }
+            if (span) span.textContent = `${report.text}`;
             if (bar) {
                 bar.style.width = `${report.progress * 100}%`;
-                if (report.text.toLowerCase().includes("error")) {
-                    bar.style.backgroundColor = "red";
-                } else if (report.progress === 1 && !report.text.toLowerCase().includes("error")) {
-                    bar.style.backgroundColor = "lightgreen";
-                } else {
-                    bar.style.backgroundColor = "lightblue";
-                }
+                if (report.text.toLowerCase().includes("error")) bar.style.backgroundColor = "red";
+                else if (report.progress === 1 && !report.text.toLowerCase().includes("error")) bar.style.backgroundColor = "lightgreen";
+                else bar.style.backgroundColor = "lightblue";
             }
         }
-        function checkForCriticalIssues(llmOutput) {
+
+        function checkForCriticalIssues(llmOutput){
             const criticalKeywords = [
                 "critical security issue:", "major privacy concern:", "security vulnerability",
                 "privacy violation", "data leak", "exploit", "rce", "xss", "sql injection"
@@ -418,9 +423,10 @@ Analysis:`;
             }
             return false;
         }
-        async function renderMermaidDiagram() {
+
+        async function renderMermaidDiagram(){
             if (window.ZLU.executionPaths.size === 0) {
-                mermaidContainer.innerHTML = 'No execution paths recorded for diagram.';
+                mermaidContainer.innerHTML = 'No execution paths recorded for diagram. Interact with the page if instrumented.';
                 return;
             }
             try {
@@ -430,19 +436,31 @@ Analysis:`;
                     return;
                 }
                 window.mermaid.initialize({ startOnLoad: false, theme: 'neutral' });
+
                 let mermaidDefinition = 'graph TD;\n';
                 const edges = new Set();
                 for (const path of window.ZLU.executionPaths) {
                     const nodes = path.split(' -->> ');
                     for (let i = 0; i < nodes.length - 1; i++) {
-                        const fromNode = nodes[i].replace(/[^a-zA-Z0-9_]/g, '_');
-                        const toNode = nodes[i+1].replace(/[^a-zA-Z0-9_]/g, '_');
-                        if (fromNode && toNode) {
-                           edges.add(`    ${fromNode}[${JSON.stringify(nodes[i])}] --> ${toNode}[${JSON.stringify(nodes[i+1])}];`);
+                        const fromNodeId = nodes[i].replace(/[^a-zA-Z0-9_]/g, '_') + '_' + i;
+                        const toNodeId = nodes[i+1].replace(/[^a-zA-Z0-9_]/g, '_') + '_' + (i+1);
+                        const fromNodeLabel = JSON.stringify(nodes[i]);
+                        const toNodeLabel = JSON.stringify(nodes[i+1]);
+                        if (fromNodeId && toNodeId) {
+                           edges.add(`    ${fromNodeId}[${fromNodeLabel}] --> ${toNodeId}[${toNodeLabel}];`);
                         }
                     }
                 }
                 mermaidDefinition += Array.from(edges).join('\n');
+
+                if (edges.size === 0 && window.ZLU.executionPaths.size > 0) {
+                     const singleNodePath = Array.from(window.ZLU.executionPaths)[0];
+                     const singleNodeId = singleNodePath.replace(/[^a-zA-Z0-9_]/g, '_') + '_0';
+                     const singleNodeLabel = JSON.stringify(singleNodePath);
+                     mermaidDefinition += `    ${singleNodeId}[${singleNodeLabel}];`;
+                }
+
+
                 const { svg } = await window.mermaid.render('mermaid-graph-svg', mermaidDefinition);
                 mermaidContainer.innerHTML = svg;
             } catch (error) {
@@ -450,11 +468,14 @@ Analysis:`;
                 mermaidContainer.innerHTML = `Error rendering diagram: ${error.message}`;
             }
         }
+
+
         let analyzerInstance;
         try {
             analyzerInstance = new window.ZLU.JSCodeAnalyzer(window.ZLU.DEFAULT_JS_ANALYZER_MODEL_ID, updateProgress);
             await analyzerInstance._ensureInitialized();
             updateProgress({ progress: 1, text: 'Analyzer ready.' });
+
             const sampleJsCode = `
 function calculateSum(arr) {
     let sum = 0;
@@ -463,6 +484,7 @@ function calculateSum(arr) {
     }
     return sum;
 }
+
 function processData(data) {
     if (!Array.isArray(data)) {
         return "Error: Data is not an array";
@@ -473,11 +495,14 @@ function processData(data) {
     }
     return result;
 }
+
 const data = [1, '2', 3, null, 5, "<script>alert('XSS')</script>"];
-console.log(\`Processed: \${processData(data)}\`);`;
+console.log(\`Processed: \${processData(data)}\`);
+            `;
             const analysisTask = "Identify potential bugs, suggest type checking, explain the output if the provided 'data' array is used, and explicitly highlight any security or privacy concerns. Focus on security vulnerabilities and privacy leaks.";
+
             analysisResultPre.textContent = 'Starting analysis...\n';
-            await analyzerInstance.analyze(sampleJsCode, analysisTask, (type, message) => {
+            const fullAnalysis = await analyzerInstance.analyze(sampleJsCode, analysisTask, (type, message) => {
                 if (type === 'delta') {
                     analysisResultPre.textContent += message;
                 } else if (type === 'finish') {
@@ -485,17 +510,30 @@ console.log(\`Processed: \${processData(data)}\`);`;
                     console.log("Demo: Streaming Analysis Complete.");
                     if (checkForCriticalIssues(message)) {
                         demoUiContainer.style.backgroundColor = 'rgba(255, 100, 100, 0.3)';
-                        title.textContent += " (Critical Issues Found!)";
-                        title.style.color = 'red';
+                        const titleEl = demoUiContainer.querySelector('h3');
+                        if (titleEl) {
+                           titleEl.textContent += " (Critical Issues Found!)";
+                           titleEl.style.color = 'red';
+                        }
                     }
                 } else if (type === 'error') {
                     analysisResultPre.textContent += `\n\n--- ERROR: ${message} ---`;
                     demoUiContainer.style.backgroundColor = 'rgba(255,0,0,0.1)';
                 }
             });
-            if (localStorage.getItem(SCRIPT_IS_INSTRUMENTED_FLAG) === 'true') {
+
+            if (DEV_MODE) {
                 await renderMermaidDiagram();
+                const refreshDiagramButton = document.createElement('button');
+                refreshDiagramButton.textContent = 'Refresh Diagram from Traces';
+                refreshDiagramButton.style.cssText = 'margin-top: 5px; padding: 5px; font-size: 12px;';
+                refreshDiagramButton.onclick = renderMermaidDiagram;
+                const hr = document.createElement('hr');
+                mermaidContainer.appendChild(hr);
+                mermaidContainer.appendChild(refreshDiagramButton);
             }
+
+
         } catch (error) {
             console.error("Analyzer Demo Error:", error);
             updateProgress({ progress: 1, text: `Demo Error: ${error.message}` });
@@ -503,19 +541,24 @@ console.log(\`Processed: \${processData(data)}\`);`;
             demoUiContainer.style.backgroundColor = 'rgba(255,0,0,0.1)';
         }
     }
+
+
     // --- DEV_MODE: Script Instrumentation UI ---
-    function setupDevInstrumentationUI() {
+    function setupDevInstrumentationUI(){
         const devButton = document.createElement('button');
-        devButton.textContent = 'Instrument Script for Tracing';
+        devButton.textContent = 'Instrument & Reload Script';
+        devButton.title = 'Modifies the current userscript with trace calls and reloads the page.';
         devButton.style.cssText = `
             position: fixed; top: 50px; right: 10px; z-index: 10001;
             padding: 8px 12px; background-color: #ffc107; color: black;
             border: none; border-radius: 5px; cursor: pointer; font-size: 12px;
         `;
         document.body.appendChild(devButton);
+
         devButton.onclick = async () => {
             devButton.disabled = true;
-            devButton.textContent = 'Loading Dev Tools...';
+            devButton.textContent = 'Preparing...';
+
             const dialog = document.createElement('div');
             dialog.style.cssText = `
                 position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
@@ -523,123 +566,140 @@ console.log(\`Processed: \${processData(data)}\`);`;
                 z-index: 10002; box-shadow: 0 0 15px rgba(0,0,0,0.3); width: 80vw; max-width: 800px;
                 display: flex; flex-direction: column; gap: 10px;
             `;
+
             const h = document.createElement('h4');
-            h.textContent = 'Script Instrumentation (Dev Mode)';
+            h.textContent = 'Script Instrumentation & Reload (Dev Mode)';
             h.style.margin = '0 0 10px 0';
             dialog.appendChild(h);
+
             const p = document.createElement('p');
-            p.innerHTML = `The core logic of the script is shown below. It will be processed to inject 'trace()' calls.
-                           The modified code will appear in the second textarea and then automatically saved & reloaded.`;
+            p.innerHTML = `Paste your <strong>current, original userscript source code</strong> below.
+                           It will be processed to inject 'trace()' calls, stored, and then the page will reload to run the instrumented version.`;
             p.style.fontSize = '13px';
             dialog.appendChild(p);
+
             const inputLabel = document.createElement('label');
-            inputLabel.textContent = 'Original Script Core Logic (for reference):';
+            inputLabel.textContent = 'Original Script Source (this entire script):';
             dialog.appendChild(inputLabel);
             const inputArea = document.createElement('textarea');
-            inputArea.id = 'instrumentationInputArea';
-            inputArea.rows = 8;
-            inputArea.readOnly = true; // Readonly, as we use the passed sourceBodyForInstrumentation
+            inputArea.rows = 15;
+            inputArea.placeholder = "// ==UserScript==\n// ... your script ...\n// ==/UserScript==\n\n(async function() {\n  'use strict';\n  // ... your code ...\n})();";
             inputArea.style.width = '100%';
-            inputArea.style.backgroundColor = '#eee';
-            inputArea.value = sourceBodyForInstrumentation;
+            inputArea.value = `// ==UserScript==
+${Array.from(document.head.querySelectorAll('script')).find(s => s.textContent.includes('@name         JavaScript Code Analyzer'))?.textContent.match(/\/\/ @name         JavaScript Code Analyzer[\s\S]*?\/\/ ==\/UserScript==/s)?.[0] || `// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
+// @namespace    http://tampermonkey.net/
+// @version      0.3.1
+// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection (auto-reloads with instrumented code) and Mermaid flow visualization.
+// @author       ZLudany (enhanced by AI)
+// @match        https://home.google.com/*
+// @connect      cdn.jsdelivr.net
+// @connect      huggingface.co
+// @connect      *.mlc.ai
+// @connect      cdnjs.cloudflare.com
+// @grant        GM_setClipboard
+// @date         2023-10-28T12:30:00+00:00
+// ==/UserScript==`}
+
+(async function() {
+    'use strict';
+    // --- PASTE THE REST OF YOUR SCRIPT'S IIFE CONTENT HERE ---
+    // For example, from the line after "'use strict';" down to the final "})();"
+    // This part is tricky to auto-fill perfectly without knowing the exact script structure if it changes.
+    // The above attempts to grab the header. The IIFE body needs to be added.
+    // A simpler approach for the user might be to just provide the full script manually.
+    // For now, I'll just use the current function's string representation (which is this IIFE).
+    // This is not perfect because it will include the instrumentation UI logic itself,
+    // which is usually not what you want to instrument.
+    // The BEST is to manually paste the *clean* original script source.
+    const thisScriptContent = arguments.callee.toString();
+    const startOfIIFEBody = thisScriptContent.indexOf("'use strict';") + "'use strict';".length;
+    const endOfIIFEBody = thisScriptContent.lastIndexOf('})();');
+    inputArea.value += '\n\n' + thisScriptContent.substring(startOfIIFEBody, endOfIIFEBody) + "\n})();";
+
             dialog.appendChild(inputArea);
-            const outputLabel = document.createElement('label');
-            outputLabel.textContent = 'Modified Script Core Logic (will be saved):';
-            dialog.appendChild(outputLabel);
-            const outputArea = document.createElement('textarea');
-            outputArea.rows = 8;
-            outputArea.readOnly = true;
-            outputArea.style.width = '100%';
-            outputArea.style.backgroundColor = '#f0f0f0';
-            dialog.appendChild(outputArea);
+
             const processButton = document.createElement('button');
-            processButton.textContent = 'Process, Instrument, Save & Reload';
+            processButton.textContent = 'Instrument & Reload Page';
             dialog.appendChild(processButton);
+
             const closeButton = document.createElement('button');
             closeButton.textContent = 'Cancel';
             closeButton.onclick = () => {
                 dialog.remove();
                 devButton.disabled = false;
-                devButton.textContent = 'Instrument Script for Tracing';
+                devButton.textContent = 'Instrument & Reload Script';
             };
             dialog.appendChild(closeButton);
+
             document.body.appendChild(dialog);
+
             try {
                 const worker = await getAcornWorker();
-                devButton.textContent = 'Instrument Script for Tracing';
+                devButton.textContent = 'Instrument & Reload Script';
                 processButton.disabled = false;
+
                 processButton.onclick = async () => {
-                    processButton.textContent = 'Processing...';
+                    const sourceCode = inputArea.value;
+                    if (!sourceCode.trim() || !sourceCode.includes("// ==UserScript==") || !sourceCode.includes("(async function()")) {
+                        alert("Please paste the full, valid userscript source code, including the ==UserScript== header and the (async function(){...})(); wrapper.");
+                        return;
+                    }
+                    processButton.textContent = 'Processing... Page will reload soon.';
                     processButton.disabled = true;
                     closeButton.disabled = true;
-                    outputArea.value = 'Processing, please wait...';
+
                     worker.onmessage = (e) => {
                         if (e.data.success) {
-                            outputArea.value = e.data.modifiedCode;
-                            localStorage.setItem(SCRIPT_CONTENT_STORAGE_KEY, e.data.modifiedCode);
-                            localStorage.setItem(SCRIPT_IS_INSTRUMENTED_FLAG, 'true');
-                            outputArea.value += "\n\n--- Saved to localStorage. Reloading page in 3 seconds... ---";
-                            if (typeof GM_setClipboard === 'function') {
-                                GM_setClipboard(e.data.modifiedCode, 'text');
-                                outputArea.value += "\n// --- (Also copied to clipboard) ---";
-                            }
-                            setTimeout(() => location.reload(), 3000);
+                            localStorage.setItem(INSTRUMENTED_CODE_KEY, e.data.modifiedCode);
+                            localStorage.setItem(RELOAD_FLAG_KEY, 'true');
+                            localStorage.setItem(RELOAD_FLAG_KEY + '_marker', 'true');
+                            localStorage.setItem(RELOAD_FLAG_KEY + '_just_reloaded_for_instrumentation', 'true');
+                            alert("Code instrumented. Page will now reload.");
+                            location.reload();
                         } else {
-                            outputArea.value = `Error during instrumentation:\n${e.data.error}`;
-                            processButton.textContent = 'Process, Instrument, Save & Reload';
+                            alert(`Error during instrumentation:\n${e.data.error}\nPage will not reload.`);
+                            processButton.textContent = 'Instrument & Reload Page';
                             processButton.disabled = false;
                             closeButton.disabled = false;
                         }
                     };
                     worker.onerror = (err) => {
-                         outputArea.value = `Worker communication error:\n${err.message}`;
-                         processButton.textContent = 'Process, Instrument, Save & Reload';
+                         alert(`Worker communication error:\n${err.message}\nPage will not reload.`);
+                         processButton.textContent = 'Instrument & Reload Page';
                          processButton.disabled = false;
                          closeButton.disabled = false;
                     };
-                    const functionsToIgnore = ['getFunc', 'trace', 'loadScript', 'loadWebLLMScript',
-                                             '_initialize', '_ensureInitialized', // JSCodeAnalyzer methods
-                                             'updateProgress', 'checkForCriticalIssues', 'renderMermaidDiagram', // Demo UI functions
-                                             'setupDevInstrumentationUI', 'setupClearInstrumentationButton', 'initializeApp' // Setup functions
-                                            ];
+
+                    const functionsToIgnore = [
+                        'trace', 'getFunc', 'loadScript', 'loadWebLLMScript',
+                        '_initialize', '_ensureInitialized', 'analyze', 'resetChat', 'dispose', // JSCodeAnalyzer methods
+                        'runAnalyzerDemo', 'updateProgress', 'checkForCriticalIssues', 'renderMermaidDiagram', // Demo functions
+                        'setupDevInstrumentationUI', 'initializeApp', // Dev UI and init functions
+                        'getAcornWorker' // Worker utility
+                        // The IIFE itself (anonymous function wrapper) will also be instrumented if not careful,
+                        // but the current Acorn worker logic focuses on named/arrow functions.
+                    ];
+
                     worker.postMessage({
-                        sourceCode: sourceBodyForInstrumentation,
+                        sourceCode,
                         acornPath: ACORN_CDN,
                         escodegenPath: ESCODEGEN_CDN,
                         estraversePath: ESTRAVERSE_CDN,
-                        functionsToIgnore: functionsToIgnore
+                        functionsToIgnore
                     });
                 };
+
             } catch (err) {
                 console.error("Failed to setup dev instrumentation UI:", err);
-                alert("Error loading dev tools: " + err.message);
+                alert("Error loading dev tools: " + err..message);
                 dialog.remove();
                 devButton.disabled = false;
-                devButton.textContent = 'Instrument Script for Tracing';
+                devButton.textContent = 'Instrument & Reload Script';
             }
         };
     }
-    // --- Clear Instrumentation Button ---
-    function setupClearInstrumentationButton() {
-        const clearButton = document.createElement('button');
-        clearButton.textContent = 'Revert to Original Script & Reload';
-        clearButton.style.cssText = `
-            position: fixed; top: 90px; right: 10px; z-index: 10001;
-            padding: 8px 12px; background-color: #dc3545; color: white;
-            border: none; border-radius: 5px; cursor: pointer; font-size: 12px;
-        `;
-        clearButton.onclick = () => {
-            localStorage.removeItem(SCRIPT_CONTENT_STORAGE_KEY);
-            localStorage.removeItem(SCRIPT_IS_INSTRUMENTED_FLAG);
-            alert('Instrumented version cleared. Reloading to original script.');
-            location.reload();
-        };
-        if (document.body) {
-            document.body.appendChild(clearButton);
-        } else {
-            window.addEventListener('DOMContentLoaded', () => document.body.appendChild(clearButton), {once: true});
-        }
-    }
+
+
     // --- Auto-run demo button & Dev Mode UI Setup ---
     const startDemoButton = document.createElement('button');
     startDemoButton.textContent = 'Start JS Analyzer Demo (loads ~4GB model)';
@@ -653,22 +713,23 @@ console.log(\`Processed: \${processData(data)}\`);`;
         startDemoButton.disabled = true;
         startDemoButton.textContent = 'Demo Initializing...';
     };
-    function initializeApp() {
+
+    function initializeApp(){
         if (document.body) {
            document.body.appendChild(startDemoButton);
            if (DEV_MODE) {
                setupDevInstrumentationUI();
-               setupClearInstrumentationButton();
            }
         } else {
            window.addEventListener('DOMContentLoaded', () => {
                document.body.appendChild(startDemoButton);
                if (DEV_MODE) {
                    setupDevInstrumentationUI();
-                   setupClearInstrumentationButton();
                }
            }, {once: true});
         }
     }
+
     initializeApp();
-};
+
+})();
