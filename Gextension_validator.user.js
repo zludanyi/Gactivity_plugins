@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         JavaScript Code Analyzer (webLLM) - Advanced Reload
 // @namespace    http://tampermonkey.net/
-// @version      0.3.9.9
-// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection. Worker dependencies (Acorn, Escodegen, EStraverse, SourceMap, ESUtils) are pre-fetched and environment mocked for worker eval. Corrected ESUtils CDN path.
+// @version      0.3.9.10
+// @description  Analyzes JavaScript code using WebLLM, with dev mode for trace injection. Worker dependencies (Acorn, Escodegen, EStraverse, SourceMap, ESUtils and its components) are pre-fetched and environment mocked for worker eval.
 // @author       ZLudany (enhanced by AI)
 // @match        https://home.google.com/*
 // @connect      cdn.jsdelivr.net       // For WebLLM library, Mermaid, Acorn, Escodegen, ESTraverse, SourceMap, ESUtils
@@ -11,8 +11,8 @@
 // ==/UserScript==
 
 // Top-level scope of the userscript
-const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_9';
-const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_9';
+const INSTRUMENTED_CODE_KEY = 'userscript_instrumented_code_v0_3_9_10';
+const RELOAD_FLAG_KEY = 'userscript_reload_with_instrumented_code_v0_3_9_10';
 let runOriginalScriptMainIIFE = true;
 
 if (localStorage.getItem(RELOAD_FLAG_KEY) === 'true') {
@@ -55,7 +55,10 @@ if (runOriginalScriptMainIIFE) {
         const ESCODEGEN_CDN = 'https://cdn.jsdelivr.net/npm/escodegen@2.1.0/escodegen.js';
         const ESTRAVERSE_CDN = 'https://cdn.jsdelivr.net/npm/estraverse@5.3.0/estraverse.js';
         const SOURCE_MAP_CDN = 'https://cdn.jsdelivr.net/npm/source-map@0.7.4/dist/source-map.min.js';
-        const ESUTILS_CDN = 'https://cdn.jsdelivr.net/npm/esutils@2.0.3/esutils.js'; // Corrected path
+        const ESUTILS_AST_CDN = 'https://cdn.jsdelivr.net/npm/esutils@2.0.3/lib/ast.js';
+        const ESUTILS_CODE_CDN = 'https://cdn.jsdelivr.net/npm/esutils@2.0.3/lib/code.js';
+        const ESUTILS_KEYWORD_CDN = 'https://cdn.jsdelivr.net/npm/esutils@2.0.3/lib/keyword.js';
+        const ESUTILS_MAIN_CDN = 'https://cdn.jsdelivr.net/npm/esutils@2.0.3/lib/utils.js'; // This is likely what 'esutils' resolves to
         const MERMAID_CDN = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
 
         if (typeof window.ZLU === 'undefined') {
@@ -141,7 +144,9 @@ if (runOriginalScriptMainIIFE) {
         };
         const ACORN_WORKER_SOURCE = `
 self.onmessage = async (event) => {
-    const { sourceCode, acornCode, escodegenCode, estraverseCode, sourceMapCode, esutilsCode, functionsToIgnore } = event.data;
+    const { sourceCode, acornCode, escodegenCode, estraverseCode, sourceMapCode, 
+            esutilsAstCode, esutilsCodeCode, esutilsKeywordCode, esutilsMainCode, 
+            functionsToIgnore } = event.data;
     
     const originalWindow = self.window;
     const originalRequire = self.require;
@@ -151,13 +156,21 @@ self.onmessage = async (event) => {
     try {
         self.window = self; 
 
+        // Temporary storage for eval'd sub-modules
+        const tempModules = {};
+
         self.require = function(moduleName) {
             console.log("Worker: Mock require called for:", moduleName);
             if (moduleName === 'fs') { console.warn("Worker: Mocked 'fs' module requested. Returning empty object."); return {}; }
             if (moduleName === 'path') { console.warn("Worker: Mocked 'path' module requested. Returning empty object."); return {}; }
+            
+            if (moduleName === './ast' && tempModules.esutils_ast) return tempModules.esutils_ast;
+            if (moduleName === './code' && tempModules.esutils_code) return tempModules.esutils_code;
+            if (moduleName === './keyword' && tempModules.esutils_keyword) return tempModules.esutils_keyword;
+            
             if (moduleName === 'source-map' && (typeof self.sourceMap === 'object' || typeof self.sourceMap === 'function')) return self.sourceMap;
             if (moduleName === 'estraverse' && (typeof self.estraverse === 'object' || typeof self.estraverse === 'function')) return self.estraverse;
-            if (moduleName === 'esutils' && (typeof self.esutils === 'object' || typeof self.esutils === 'function')) return self.esutils;
+            if (moduleName === 'esutils' && (typeof self.esutils === 'object' || typeof self.esutils === 'function')) return self.esutils; // For when escodegen requires 'esutils'
             
             if (typeof originalRequire === 'function') {
                 return originalRequire.apply(this, arguments);
@@ -166,29 +179,45 @@ self.onmessage = async (event) => {
             throw new Error("Worker: Mock require cannot resolve module: " + moduleName);
         };
         
-        var module, exports;
+        var module, exports; // Declare for function scope within evalLibrary
 
-        function evalLibrary(code, libName, selfPropertyName) {
-            if (code && typeof self[selfPropertyName] === 'undefined') {
+        function evalLibrary(code, libName, selfPropertyName, tempModuleStoreName) {
+            if (code && (typeof self[selfPropertyName] === 'undefined' && (tempModuleStoreName ? typeof tempModules[tempModuleStoreName] === 'undefined' : true))) {
                 console.log(\`Worker: Evaluating \${libName} code...\`);
                 module = { exports: {} }; 
                 exports = module.exports;
                 eval(code);
-                if (typeof self[selfPropertyName] === 'undefined' && (typeof module.exports === 'object' || typeof module.exports === 'function') && Object.keys(module.exports).length > 0) {
-                     self[selfPropertyName] = module.exports;
+                
+                let assignedExport = null;
+                if ((typeof module.exports === 'object' || typeof module.exports === 'function') && Object.keys(module.exports).length > 0) {
+                    assignedExport = module.exports;
                 }
-                console.log(\`Worker: \${libName} evaluated. Type of self.\${selfPropertyName}: \`, typeof self[selfPropertyName]);
-                if (typeof self[selfPropertyName] !== 'object' && typeof self[selfPropertyName] !== 'function') {
-                     console.warn(\`Worker: self.\${selfPropertyName} might not be correctly set after \${libName} eval for '\${libName}'.\`);
+
+                if (tempModuleStoreName) {
+                    tempModules[tempModuleStoreName] = assignedExport || {}; // Store even if empty to satisfy require
+                    console.log(\`Worker: \${libName} stored in tempModules.\${tempModuleStoreName}. Type: \`, typeof tempModules[tempModuleStoreName]);
+
+                } else if (selfPropertyName) {
+                     if (typeof self[selfPropertyName] === 'undefined' && assignedExport) {
+                        self[selfPropertyName] = assignedExport;
+                     }
+                     console.log(\`Worker: \${libName} evaluated. Type of self.\${selfPropertyName}: \`, typeof self[selfPropertyName]);
+                     if (typeof self[selfPropertyName] !== 'object' && typeof self[selfPropertyName] !== 'function') {
+                         console.warn(\`Worker: self.\${selfPropertyName} might not be correctly set after \${libName} eval for '\${libName}'.\`);
+                     }
                 }
             }
         }
 
         evalLibrary(sourceMapCode, "SourceMap", "sourceMap");
-        evalLibrary(esutilsCode, "ESUtils", "esutils");
+        evalLibrary(esutilsAstCode, "ESUtils AST", null, "esutils_ast");
+        evalLibrary(esutilsCodeCode, "ESUtils Code", null, "esutils_code");
+        evalLibrary(esutilsKeywordCode, "ESUtils Keyword", null, "esutils_keyword");
+        evalLibrary(esutilsMainCode, "ESUtils Main (utils.js)", "esutils"); // This should now work, using mocked requires for its parts
+
         evalLibrary(estraverseCode, "EStraverse", "estraverse");
         evalLibrary(acornCode, "Acorn", "acorn");
-        evalLibrary(escodegenCode, "Escodegen", "escodegen");
+        evalLibrary(escodegenCode, "Escodegen", "escodegen"); // Escodegen should now find 'esutils' via the mock require
         
         if (!self.acorn || !self.escodegen || !self.estraverse) {
             throw new Error("Worker: One or more AST libraries (Acorn, Escodegen, Estraverse) are not available on self after eval.");
@@ -244,14 +273,17 @@ self.onmessage = async (event) => {
             if (!window.ZLU.fetchedLibraryCode) {
                 console.log("Pre-fetching AST libraries for worker...");
                 try {
-                    const [acornCode, escodegenCode, estraverseCode, sourceMapCode, esutilsCode] = await Promise.all([
+                    const [acornCode, escodegenCode, estraverseCode, sourceMapCode, esutilsAstCode, esutilsCodeCode, esutilsKeywordCode, esutilsMainCode] = await Promise.all([
                         fetchScriptAsText(ACORN_CDN, "Acorn"),
                         fetchScriptAsText(ESCODEGEN_CDN, "Escodegen"),
                         fetchScriptAsText(ESTRAVERSE_CDN, "Estraverse"),
                         fetchScriptAsText(SOURCE_MAP_CDN, "SourceMap"),
-                        fetchScriptAsText(ESUTILS_CDN, "ESUtils")
+                        fetchScriptAsText(ESUTILS_AST_CDN, "ESUtils AST"),
+                        fetchScriptAsText(ESUTILS_CODE_CDN, "ESUtils Code"),
+                        fetchScriptAsText(ESUTILS_KEYWORD_CDN, "ESUtils Keyword"),
+                        fetchScriptAsText(ESUTILS_MAIN_CDN, "ESUtils Main")
                     ]);
-                    window.ZLU.fetchedLibraryCode = { acornCode, escodegenCode, estraverseCode, sourceMapCode, esutilsCode };
+                    window.ZLU.fetchedLibraryCode = { acornCode, escodegenCode, estraverseCode, sourceMapCode, esutilsAstCode, esutilsCodeCode, esutilsKeywordCode, esutilsMainCode };
                     console.log("AST libraries pre-fetched successfully.");
                 } catch (error) {
                     console.error("Failed to pre-fetch one or more AST libraries for worker:", error);
@@ -259,15 +291,16 @@ self.onmessage = async (event) => {
                     throw error;
                 }
             }
-            if (!window.ZLU.fetchedLibraryCode || !window.ZLU.fetchedLibraryCode.acornCode?.trim() ||
-                !window.ZLU.fetchedLibraryCode.escodegenCode?.trim() || !window.ZLU.fetchedLibraryCode.estraverseCode?.trim() ||
-                !window.ZLU.fetchedLibraryCode.sourceMapCode?.trim() || !window.ZLU.fetchedLibraryCode.esutilsCode?.trim()
+            const fc = window.ZLU.fetchedLibraryCode;
+            if (!fc || !fc.acornCode?.trim() || !fc.escodegenCode?.trim() || !fc.estraverseCode?.trim() ||
+                !fc.sourceMapCode?.trim() || !fc.esutilsAstCode?.trim() || !fc.esutilsCodeCode?.trim() ||
+                !fc.esutilsKeywordCode?.trim() || !fc.esutilsMainCode?.trim()
             ) {
-                console.error("One or more fetched AST library codes are empty.", window.ZLU.fetchedLibraryCode);
+                console.error("One or more fetched AST library codes are empty.", fc);
                 window.ZLU.fetchedLibraryCode = null;
                 throw new Error("One or more AST libraries could not be fetched or their content was empty.");
             }
-            return window.ZLU.fetchedLibraryCode;
+            return fc;
         };
 
         async function getAcornWorkerInstance(){
@@ -351,8 +384,8 @@ self.onmessage = async (event) => {
         };
         window.ZLU.JSCodeAnalyzer = JSCodeAnalyzer;
 
-        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9.9): Running INSTRUMENTED version."); }
-        else { console.log("JSCodeAnalyzer (V0.3.9.9): Running ORIGINAL version."); }
+        if (window.ZLU_INSTRUMENTED_ACTIVE === true) { console.log("JSCodeAnalyzer (V0.3.9.10): Running INSTRUMENTED version."); }
+        else { console.log("JSCodeAnalyzer (V0.3.9.10): Running ORIGINAL version."); }
         console.log(`Default model for analysis: ${DEFAULT_MODEL_ID}`);
 
         async function runAnalyzerDemo(){
@@ -403,7 +436,7 @@ self.onmessage = async (event) => {
                 const paragraph=document.createElement('p'); paragraph.innerHTML=`Paste <strong>original userscript source</strong>. It's processed, stored, then page reloads.`; paragraph.style.fontSize='13px'; dialogDiv.appendChild(paragraph);
                 const label=document.createElement('label'); label.textContent='Original Script Source:'; dialogDiv.appendChild(label);
                 const textarea=document.createElement('textarea'); textarea.rows=15; textarea.placeholder="// ==UserScript==..."; textarea.style.width='100%';
-                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9.9\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
+                let prefillHeader = `// ==UserScript==\n// @name         JavaScript Code Analyzer (webLLM) - Advanced Reload\n// @version      0.3.9.10\n// @description  Analyzes JavaScript code using WebLLM...\n// @author       ZLudany (enhanced by AI)\n// @match        https://home.google.com/*\n// @connect      cdn.jsdelivr.net\n// @connect      huggingface.co\n// @connect      *.mlc.ai\n// ==/UserScript==`;
                 let prefillIIFE = '(async function() { /* Paste IIFE body here */ })();';
                 try {
                     if (document.currentScript && document.currentScript.textContent) {
@@ -442,7 +475,10 @@ self.onmessage = async (event) => {
                             escodegenCode: window.ZLU.fetchedLibraryCode.escodegenCode,
                             estraverseCode: window.ZLU.fetchedLibraryCode.estraverseCode,
                             sourceMapCode: window.ZLU.fetchedLibraryCode.sourceMapCode,
-                            esutilsCode: window.ZLU.fetchedLibraryCode.esutilsCode,
+                            esutilsAstCode: window.ZLU.fetchedLibraryCode.esutilsAstCode,
+                            esutilsCodeCode: window.ZLU.fetchedLibraryCode.esutilsCodeCode,
+                            esutilsKeywordCode: window.ZLU.fetchedLibraryCode.esutilsKeywordCode,
+                            esutilsMainCode: window.ZLU.fetchedLibraryCode.esutilsMainCode,
                             functionsToIgnore:functionsToIgnoreList
                         });
                     };
