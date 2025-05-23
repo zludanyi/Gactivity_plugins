@@ -1,3 +1,11 @@
+// ==UserScript==
+// @name         test CORS
+// @version      0.1
+// @description  testing CORS 
+// @author       ZLudany
+// @match        *://*.ingatlan.com/*
+// @run-at       document-start
+// ==/UserScript==
 (function() {
       // Override iframe restrictions 
       // by injecting into parent context
