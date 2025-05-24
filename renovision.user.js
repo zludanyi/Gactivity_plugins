@@ -1034,7 +1034,7 @@ class WorkerPool {
 
     function updateBottomStatusBar(statusInfo) {
         const { apiKey, apiKeyFullStatus, processStatus, progress, etrString } = statusInfo;
-        const displayProgress = (progress === null || progress === undefined) ? 0 : Math.round(Number(progress) * 100);
+        const displayProgress = (progress === null || progress === undefined) ? 0 : Math.round(Number(progress));
         const displayEtrString = (etrString === null || etrString === undefined) ? "" : String(etrString);
 
         logger.debug("Update Statusbar:", { ...statusInfo, progress: displayProgress, etrString: displayEtrString });
@@ -1842,15 +1842,70 @@ class WorkerPool {
             }
             window.tmRenovisionV19FinalInitMapZL = () => {
                 initializeGoogleMapsServices();
-                resolve();
+                alert("Google loaded..");
+                try{
+                   Promise.resolve();
+                }
+                catch(e){
+                    logger.error("Failed loading "+
+                                 "Gmaps API script:", e);
+                    updateBottomStatusBar({
+                        apiKey: API_KEY,
+                        apiKeyFullStatus: "Error "+
+                        "(Invalid Key?)",
+                        processStatus: "Error - "+
+                        "Gmaps Load Failed",
+                        progress: 0, etrString:""
+                    });
+                }
             };
             const script = document.createElement('script');
             script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&libraries=geometry,directions&callback=tmRenovisionV19FinalInitMapZL`;
             script.async = true;
+            script.onload = (e) => {
+                logger.info("Gmaps API "+
+                       "script loaded: ", e);
+                initializeGoogleMapsServices();
+                alert("Google loaded..");
+                try{
+                   Promise.resolve();
+                }
+                catch(e){
+                    logger.error("Failed loading "+
+                                 "Gmaps API script:", e);
+                    updateBottomStatusBar({
+                        apiKey: API_KEY,
+                        apiKeyFullStatus: "Error "+
+                        "(Invalid Key?)",
+                        processStatus: "Error - "+
+                        "Gmaps Load Failed",
+                        progress: 0, etrString:""
+                    });
+                }
+            };
             script.onerror = (e) => {
-                logger.error("Failed to load Gmaps API script:", e);
-                updateBottomStatusBar({apiKey: API_KEY, apiKeyFullStatus: "Error (Invalid Key?)", processStatus: "Error - Gmaps Load Failed", progress: 0, etrString:""});
-                reject(new Error("Gmaps API script load failed."));
+                logger.error("Failed to load "+
+                       "Gmaps API script: ", e);
+                updateBottomStatusBar({
+                    apiKey: API_KEY,
+                    apiKeyFullStatus: "Error "+
+                    "(Invalid Key?)",
+                    processStatus: "Error - "+
+                    "Gmaps Load Failed",
+                    progress: 0, etrString:""
+                });
+                try{
+                   Promise.reject(
+                       new Error("Gmaps "+
+                       "API script "+
+                       "load failed.")
+                   );
+                }
+                catch(e){
+                   logger.error("failed "+
+                   "rejection of Gmaps "+
+                   "failure: "+e.message);
+                }
             };
             document.head.appendChild(script);
             logger.info("Gmaps API script tag injected.");
