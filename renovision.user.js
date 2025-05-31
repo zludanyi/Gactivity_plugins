@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Advanced Renovision
-// @version      1.9.1
+// @version      1.9.3
 // @description  All features: NativeCSS, WorkerPool, Image Cache, Progress, ETR, Batch/Swipe Feedback, Adv. Scoring, Uncertainty.
 // @author       ZLudany
 // @match        *://*.ingatlan.com/*
