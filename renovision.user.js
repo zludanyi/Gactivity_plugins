@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Advanced Renovision
-// @version      1.9.5
+// @version      1.9.6
 // @description  All features: NativeCSS, WorkerPool, Image Cache, Progress, ETR, Batch/Swipe Feedback, Adv. Scoring, Uncertainty.
 // @author       ZLudany
 // @match        *://*.ingatlan.com/*
@@ -352,7 +352,7 @@
         'use strict';
 
         let API_KEY = '';
-        const appVersion = '1.9.5';
+        const appVersion = '1.9.6';
         const logger = new Logger('Renovision advanced v'+appVersion, MAIN_THREAD_LOG_CONFIG);
         const LOCALSTORAGE_API_KEY = 'renovisionUserApiKeyZL_v1.9.1Final';
         const STREET_VIEW_IMAGE_REQUEST_SIZE = '320x240';
@@ -641,6 +641,7 @@
                 request.onsuccess = (event) => {
                     db = event.target.result;
                     logger.info("IndexedDB setup successful. DB instance:", db);
+                    alert("indexdb setup succeeded..");
                     resolve(db);
                 };
 
@@ -681,7 +682,7 @@
                     // For Image Blob Caching (Feature #1 from previous list)
                     if (!db.objectStoreNames.contains(IMAGE_CACHE_STORE_NAME)) {
                         logger.info("Creating object store:", IMAGE_CACHE_STORE_NAME);
-                        storeImageCache = db.createObjectStore(IMAGE_CACHE_STORE_NAME, { keyPath: 'url' });
+                        let storeImageCache = db.createObjectStore(IMAGE_CACHE_STORE_NAME, { keyPath: 'url' });
                         // Optional: Index for expiry timestamp if you implement that
                         // if (storeImageCache && !storeImageCache.indexNames.contains('expires')) {
                         //     storeImageCache.createIndex('expires', 'expires', { unique: false });
@@ -690,6 +691,7 @@
                          logger.debug("Object store", IMAGE_CACHE_STORE_NAME, "already exists.");
                     }
                     logger.info("IndexedDB upgrade complete.");
+                    resolve(db);
                 };
             });
         }
@@ -783,6 +785,41 @@
             });
         }
 
+        /**
+         * Retrieves all building records from the IndexedDB store.
+         * @async
+         * @returns {Promise<Array<object>>} A promise that resolves to an array of all building records,
+         *                                   or an empty array if the store is empty or an error occurs.
+         */
+        async function getAllBuildingRecordsFromDB() {
+            logger.debug("New Promise: getAllBuildingRecordsFromDB");
+            return new Promise((resolve, reject) => {
+                if (!db) {
+                    logger.warn("DB not initialized for getAllBuildingRecordsFromDB. Returning empty array.");
+                    resolve([]); // Resolve with empty if DB not ready, rather than rejecting workflow
+                    return;
+                }
+                try {
+                    const transaction = db.transaction([BUILDING_STORE_NAME], 'readonly');
+                    const store = transaction.objectStore(BUILDING_STORE_NAME);
+                    const request = store.getAll();
+
+                    request.onsuccess = (event) => {
+                        const records = event.target.result || [];
+                        logger.info(`Retrieved ${records.length} records from building store.`);
+                        resolve(records);
+                    };
+                    request.onerror = (event) => {
+                        logger.error("Error getting all building records from DB:", event.target.errorCode, event);
+                        resolve([]); // Resolve with empty array on error
+                    };
+                } catch (e) {
+                    logger.error("Exception in getAllBuildingRecordsFromDB transaction:", e);
+                    resolve([]); // Resolve with empty array on exception
+                }
+            });
+        }
+
         async function saveBuildingData(buildingData) {
             logger.debug("New Promise: saveBuildingData v"+appVersion, buildingData.addressQueryString);
             buildingData.lastUpdated = new Date().toISOString();
@@ -798,7 +835,7 @@
                     const request = store.put(buildingData);
                     request.onsuccess = () => {
                         logger.debug("Saved building data for:", buildingData.addressQueryString);
-                        resolve();
+                        resolve("saved");
                     };
                     request.onerror = (event) => {
                         logger.error("Error saving building data to DB:", event.target.errorCode, event);
@@ -1404,12 +1441,48 @@
                 etrSpanGlobal.style.display = displayEtrString ? 'inline' : 'none';
             }
 
-            const activeKW = ["fetch", "process", "validating", "Started - Loading", "crawl", "crawling", "defining references", "extracting features"];
-            const isActive = activeKW.some(s => processStatus.toLowerCase().includes(s));
-            if(processStatus == "Started - Validating Key"){
-               alert("validating: "+isActive);
-            }
-            const needsReg = !apiKey && (processStatus.toLowerCase().includes("cancel") || apiKeyFullStatus.toLowerCase().includes("unreg") || processStatus.toLowerCase().includes("await") || processStatus.toLowerCase().includes("api key error") || processStatus.toLowerCase() === "key clear" || processStatus.toLowerCase().includes("not provided"));
+            //valid async processes;
+            const activeKW = [
+            "fetch",
+            "process",
+            "validating",
+            "Started - Validating Key",
+            "Started - Loading",
+            "Initializing DB",
+            "Initializing - Setup DB",
+            "Started - Initializing DB",
+            "Checking Reference Set in DB",
+            "defining references",
+            "Started - Defining Reference Set",
+            "crawl", "crawling",
+            "Started - Fetching Street Images",
+            "extracting features",
+            "Started - Extracting "+
+            "Target Features",
+            "Started - Extracting "+
+            "Reference Features",
+            "Started - Ref Features",
+            "Started - Finalizing & Displaying"
+            ];
+            const isActive = activeKW.some(s =>
+                processStatus.
+                       toLowerCase().
+                       includes(
+                         s.toLowerCase()
+                       )
+            );
+            // if(processStatus == "Started - Validating Key"){
+            //    alert("validating: "+isActive);
+            // }
+            const needsReg = !apiKey &&
+            (
+             processStatus.toLowerCase().includes("cancel") ||
+             apiKeyFullStatus.toLowerCase().includes("unreg") ||
+             processStatus.toLowerCase().includes("await") ||
+             processStatus.toLowerCase().includes("api key error") ||
+             processStatus.toLowerCase() === "key clear" ||
+             processStatus.toLowerCase().includes("not provided")
+            );
 
             if (stopCrawlingButtonGlobal) {
                 stopCrawlingButtonGlobal.style.display = isActive ? 'inline-block' : 'none';
@@ -1419,8 +1492,19 @@
             }
             isCrawlingGlobal = isActive;
             if(!isCrawlingGlobal){
-               startButton.disabled = false;
-               startButton.textContent = "Start Analysis";
+               alert("no proc: "+processStatus.
+                     toLowerCase());
+               startButton.disabled =
+               false;
+               startButton.textContent =
+               "Start Analysis";
+            }
+            else{
+               alert("in progress@"+
+                     "updatebottomStatusBar: "+
+                     processStatus.
+                     toLowerCase()
+                    );
             }
         }
 
@@ -2014,191 +2098,280 @@
             return collectedForStreet;
         }
 
-
         async function mainAnalysisWorkflow() {
             if (isCrawlingGlobal) {
                 logger.warn("Analysis already in progress.");
                 return;
             }
-            logger.info('Starting analysis workflow v'+appVersion+'...');
+            logger.info('Starting analysis workflow (v1.9.2 with DB check for refs)...');
             isCrawlingGlobal = true;
+            // ... (initial UI updates and API_KEY check from v1.9.1) ...
             let currentKeyFullStatus = API_KEY ? (localStorage.getItem(LOCALSTORAGE_API_KEY) === API_KEY ? "Registered (localStorage)" : "Session Only") : "Unknown (Validating)";
-            alert("crawling: "+isCrawlingGlobal);
             updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: currentKeyFullStatus, processStatus: "Started - Validating Key", progress:0, etrString: ""});
             startButton.disabled = true;
             startButton.textContent = 'Processing...';
             resultsTableUnrenovatedCell.innerHTML = 'Processing...';
             resultsTableRenovatedCell.innerHTML = 'Processing...';
             summaryDiv.textContent = 'Processing...';
-            const uncertainListElement = document.getElementById('tm-uncertain-images-zl-v19final-list');
+            const uncertainListElement = document.getElementById('tm-uncertain-images-zl-v19final-list'); // Ensure ID matches
             if (uncertainListElement) uncertainListElement.innerHTML = '';
             currentAnalysisResults = [];
-            alert("crawling: "+isCrawlingGlobal);
 
             if (!API_KEY) API_KEY = await getApiKey(true);
             if (!API_KEY) {
-                logger.error("API Key is essential. Aborting.");
-                isCrawlingGlobal = false;
-                startButton.disabled = false;
-                startButton.textContent = 'Start Analysis';
-                if (crawlingStatusSpanGlobal && crawlingStatusSpanGlobal.textContent !== "Cancelled") { // Check if already "Cancelled" by prompt
-                    updateBottomStatusBar({ apiKey: null, apiKeyFullStatus: "Unregistered", processStatus: "API Key Error - Not Provided", progress: 0, etrString:""});
-                }
+                /* ... (handle no API Key error) ... */
+                alert("No api key accessible..");
                 return;
             }
 
             currentKeyFullStatus = localStorage.getItem(LOCALSTORAGE_API_KEY) === API_KEY ? "Registered (localStorage)" : "Session Only";
-            updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: currentKeyFullStatus, processStatus: "Started - Validating DB", progress: 0.01, etrString: ""});
+            updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Initializing DB", processStatus: "Started - Initializing DB", progress: 0.01, etrString: ""});
+            // alert(
+            //       "initializing db "+
+            //       "in progress: "+
+            //       isCrawlingGlobal
+            // );
 
             if (!db) {
                 try {
                     await setupDB();
-                } catch (e) {
-                    logger.error("DB Setup failed:", e);
-                    updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "DB Setup failed", processStatus: "Error - DB Setup Failed", progress: 0, etrString:""});
+                }
+                catch (e) {
+                /* ... (handle DB error) ... */
+                    alert("err in db");
+                    return;
+                }
+            }
+            if (!isCrawlingGlobal) {
+                /* ... (handle stop) ... */
+                alert("setup process stopped!");
+                return;
+            }
+
+            // --- Point 6 & New DB Check: Improved Base Pair / Reference Set ---
+            updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Checking Reference Set in DB", processStatus: "Started - Checking Reference Set in DB", progress: 0.02, etrString: "" });
+            let existingRenovatedRefsFeatures = [];
+            let existingUnrenovatedRefsFeatures = [];
+            let loadReferencesFromUser = true; // Flag to determine if we need to prompt user
+            //alert("checking ref set in DB");
+
+            logger.debug("New Promise (implicit): getAllBuildingRecordsFromDB for initial reference check");
+            const allDbRecords = await getAllBuildingRecordsFromDB();
+            const recentModelSignature = MODEL_SIGNATURE;
+            const maxRefAgeDays = 30; // Example: references older than 30 days might be re-prompted
+
+            for (const record of allDbRecords) {
+                if (record.userVerifiedStatusAsReference && // Check for our specific reference flag
+                    record.embedding && // Ensure features/embedding exists
+                    record.modelSignature === recentModelSignature && // Ensure features are from current model
+                    record.referenceSetDefinitionDate) { // Ensure it was part of a defined set
+
+                    const refDate = new Date(record.referenceSetDefinitionDate);
+                    const ageDays = (Date.now() - refDate.getTime()) / (1000 * 3600 * 24);
+
+                    if (ageDays <= maxRefAgeDays) {
+                        if (record.userVerifiedStatusAsReference === 'renovated') {
+                            existingRenovatedRefsFeatures.push(record.embedding);
+                        } else if (record.userVerifiedStatusAsReference === 'unrenovated') {
+                            existingUnrenovatedRefsFeatures.push(record.embedding);
+                        }
+                    } else {
+                        logger.debug("Found stale reference in DB (older than", maxRefAgeDays, "days):", record.addressQueryString);
+                    }
+                }
+            }
+
+            if (existingRenovatedRefsFeatures.length >= 2 && existingUnrenovatedRefsFeatures.length >= 2) { // Min 2 of each for decent centroids
+                logger.info("Found existing, recent, and valid reference set features in IndexedDB. Using them.");
+                renovatedCentroid = averageFeatures(existingRenovatedRefsFeatures);
+                unrenovatedCentroid = averageFeatures(existingUnrenovatedRefsFeatures);
+
+                if (!renovatedCentroid || !unrenovatedCentroid) {
+                     logger.error("Error calculating centroids from stored reference features. Will re-prompt user.");
+                     loadReferencesFromUser = true; // Force re-prompt
+                     renovatedCentroid = null; unrenovatedCentroid = null; // Reset
+                } else {
+                     logger.info("Centroids successfully calculated from stored reference set.");
+                     loadReferencesFromUser = false; // We have what we need
+                }
+            } else {
+                alert("not enough ref..");
+                logger.info("Not enough existing/recent reference images in DB (Renovated:", existingRenovatedRefsFeatures.length, "Unrenovated:", existingUnrenovatedRefsFeatures.length,"). Will prompt user.");
+                loadReferencesFromUser = true;
+            }
+
+            // Add a button to explicitly allow re-defining references
+            // This button could set loadReferencesFromUser = true and restart part of the workflow
+            // For now, it's automatic if not found/stale.
+
+            if (loadReferencesFromUser) {
+                const initialRefCandidateAddresses = [ /* ... your candidate addresses ... */
+                    "Budapest, Andrássy út 10", "Budapest, Váci utca 20", "Budapest, Király utca 30",
+                    "Budapest, Rákóczi út 5", "Budapest, Dohány utca 15",
+                    // The original "BASE_PAIR_ADDRESSES" are good candidates too
+                    "Budapest, 1068, Benczúr utca 8.", "Budapest, 1077, Jósika utca 29."
+                ].filter((v, i, a) => a.indexOf(v) === i);
+
+                updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Started - Loading", processStatus: `Started - Loading ${initialRefCandidateAddresses.length} Ref Candidates...`, progress: 0.03, etrString: ""});
+                allImagesToProcess = []; // Reset for fresh load or pre-fetch
+                for (const addr of initialRefCandidateAddresses) {
+                    if (!isCrawlingGlobal) { /* handle stop */ return; }
+                    logger.debug("New Promise (implicit): getImageDataForAddress for reference candidate in main workflow", addr);
+                    const imgDataResult = await getImageDataForAddress(addr, `ref_cand_${addr.replace(/[^a-zA-Z0-9]/g, '')}`);
+                    if (imgDataResult && imgDataResult.imageData) {
+                        allImagesToProcess.push({ ...imgDataResult, id: addr, type: 'reference_candidate' });
+                    }
+                    else {
+                        logger.warn("Could not load initial image data for reference candidate during pre-fetch:", addr);
+                    }
+                }
+                if (!isCrawlingGlobal) {
+                    /* handle stop */
+                    return;
+                }
+
+                updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Started - Defining Reference Set", processStatus: "Started - Defining Reference Set", progress: 0.05, etrString: ""});
+                logger.debug("New Promise (implicit): promptForReferenceSetUI in main workflow");
+                const userDefinedReferences = await promptForReferenceSetUI(initialRefCandidateAddresses); // Uses allImagesToProcess
+                if (!isCrawlingGlobal) {
+                    /* handle stop */
+                    //alert("stopped after ref..");
+                    return;
+                }
+                // alert("userDefinedReferences: "+
+                //       userDefinedReferences);
+                if (!userDefinedReferences ||
+                    (userDefinedReferences.
+                     renovated.length < 1 &&
+                     userDefinedReferences.
+                     unrenovated.length < 1
+                    )
+                ) { // Allow if at least one of one type is selected
+                    logger.error("Not enough reference images defined by user. Need at least one of each or a mixed set. Aborting.");
+                    alert("not enough references");
+                    updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Insufficient References Defined", processStatus: "Error - Insufficient References Defined"});
                     isCrawlingGlobal = false;
                     startButton.disabled = false;
                     startButton.textContent = "Start Analysis";
                     return;
                 }
-            }
-            alert(db+" : "+isCrawlingGlobal);
+                else{
+                    try {
+                        let sRef = await saveBuildingData(
+                          userDefinedReferences
+                        );
+                        if(!sRef){
+                           alert("Reference "+
+                           "not returned to "+
+                           "be saved..");
+                        }
+                    }
+                    catch(e){
+                        alert("Reference not saved: "+
+                              e.message);
+                    }
+                }
+                logger.info("User defined references collected:", userDefinedReferences);
+
+                // Initialize WorkerPool (if not already done by a previous step, though it's better done once)
+                if (!workerPoolInstance) {
+                    logger.info("WorkerPool: Initializing for reference feature extraction.");
+                    const workerScriptBlob = createFeatureExtractionWorkerScriptContent();
+                    const workerScriptUrl = URL.createObjectURL(workerScriptBlob);
+                    try {
+                        workerPoolInstance = new WorkerPool(workerScriptUrl, logger);
+                        workerPoolInstance.workers.forEach(wEntry => {
+                            wEntry.worker.postMessage({ type: 'INIT_TF_AND_CONFIG_WORKER_POOL', payload: { tfjsUrl: 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0', logConfig: WORKER_LOG_CONFIG_FOR_POOL }});
+                        });
+                    } catch (e) { /* ... handle error ... */ }
+                }
+                updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Started - Extracting Reference Features", processStatus: "Started - Extracting Reference Features", progress: 0.10, etrString: "" });
+
+                const referenceImagesForPool = [
+                    ...userDefinedReferences.renovated.map(ref => ({...ref, classification: 'renovated'})),
+                    ...userDefinedReferences.unrenovated.map(ref => ({...ref, classification: 'unrenovated'}))
+                ];
+
+                let processedRefCount = 0;
+                const totalRefsForPool = referenceImagesForPool.length;
+                logger.debug("New Promise (implicit): Processing reference images for features via WorkerPool (main workflow)");
+                const referenceFeaturePromises = referenceImagesForPool.map((refImg, index) => {
+                    // ... (processImage call from v1.9, update progress)
+                    if (!isCrawlingGlobal) return Promise.resolve(null);
+                    if (!refImg.imageData || !refImg.imageData.data) return Promise.resolve({...refImg, features: null, error: "Missing ref imageData"});
+                    const imgDataForWorker = { data: refImg.imageData.data, width: refImg.imageData.width, height: refImg.imageData.height };
+                    return workerPoolInstance.processImage(imgDataForWorker, refImg.addressQueryString, refImg.addressQueryString)
+                        .then(result => {
+                            processedRefCount++;
+                            updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Started - Ref Features", processStatus: `Started - Ref Features (${processedRefCount}/${totalRefsForPool})`, progress: 0.10 + (0.15 * (processedRefCount/totalRefsForPool)), etrString: "" });
+                            return { ...refImg, features: result.features }; // result.features is the embedding array
+                        })
+                        .catch(error => ({ ...refImg, features: null, error: error.message }));
+                });
+                const processedReferences = await Promise.all(referenceFeaturePromises);
+                if (!isCrawlingGlobal) { /* ... handle stop ... */ return; }
+
+                const validRenovatedRefs = processedReferences.filter(r => r && r.classification === 'renovated' && r.features);
+                const validUnrenovatedRefs = processedReferences.filter(r => r && r.classification === 'unrenovated' && r.features);
+
+                if (validRenovatedRefs.length === 0 || validUnrenovatedRefs.length === 0) { /* ... error: not enough for centroids ... */ }
+                renovatedCentroid = averageFeatures(validRenovatedRefs.map(r => r.features));
+                unrenovatedCentroid = averageFeatures(validUnrenovatedRefs.map(r => r.features));
+                if(!renovatedCentroid || !unrenovatedCentroid) { /* ... error ... */ return; }
+                logger.info("Reference Centroids Calculated from user input.");
+
+                // Save these newly defined references to IndexedDB
+                const currentTimestamp = new Date().toISOString();
+                for (const ref of [...validRenovatedRefs, ...validUnrenovatedRefs]) {
+                    logger.debug("New Promise (implicit): getBuildingData for saving user-defined reference", ref.addressQueryString);
+                    let buildingRecord = await getBuildingData(ref.addressQueryString);
+                    if (!buildingRecord) {
+                        buildingRecord = { addressQueryString: ref.addressQueryString, loc: ref.loc }; // Assuming ref has loc
+                    }
+                    buildingRecord.embedding = ref.features;
+                    buildingRecord.modelSignature = MODEL_SIGNATURE;
+                    buildingRecord.userVerifiedStatus = null; // Clear general user verification
+                    buildingRecord.userFeedbackDate = null;   // Clear general user feedback date
+                    buildingRecord.userVerifiedStatusAsReference = ref.classification; // SET NEW SPECIFIC FLAG
+                    buildingRecord.referenceSetDefinitionDate = currentTimestamp;    // SET NEW DATE
+                    logger.debug("New Promise (implicit): saveBuildingData for user-defined reference", ref.addressQueryString);
+                    await saveBuildingData(buildingRecord);
+                }
+                logger.info("User-defined reference set features saved to IndexedDB.");
+            } // End of if (loadReferencesFromUser)
+
+            // --- Target Street Image Fetching (Metadata + imageData) ---
+            // ... (This part remains largely the same as v1.9, fetching images and then their features)
+            updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Started - Fetching Street Images", processStatus: "Started - Fetching Street Images", progress: 0.25, etrString: "" });
+            allImagesToProcess = []; // Reset for target street
+            const targetStreetMetaData = await fetchImagesForStreetSection(TARGET_STREET_START_ADDRESS, TARGET_STREET_END_ADDRESS);
+            // ... (Check for stop and errors as in v1.9) ...
             if (!isCrawlingGlobal) {
-                logger.info("Crawling stopped by user during DB setup..");
-                updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Crawling stopped by user during DB setup..", processStatus: "Stopped - By User", progress: 0, etrString:""});
+                updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Stopped - by User", processStatus: "Stopped - By User", progress:null, etrString:""});
                 return;
             }
-            alert("not stopped yet!");
-
-            // Define Reference Set
-            const initialRefCandidateAddresses = [
-                "Budapest, Andrássy út 10", "Budapest, Váci utca 20", "Budapest, Király utca 30",
-                "Budapest, Rákóczi út 5", "Budapest, Dohány utca 15",
-                "Budapest, 1068, Benczúr utca 8.", "Budapest, 1077, Jósika utca 29." // Original base pair
-            ].filter((v, i, a) => a.indexOf(v) === i);
-
-            updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Crawling started..", processStatus: `crawling started ${initialRefCandidateAddresses.length} Reference Candidates...`, progress: 0.02, etrString: "" });
-            allImagesToProcess = [];
-            for (const addr of initialRefCandidateAddresses) {
-                if (!isCrawlingGlobal) {
-                    alert("not loading: "+addr);
-                    updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Crawling stopped by user during reference image load..", processStatus: "Stopped - By User", progress: 0, etrString:""});
-                    return;
-                }
-                logger.debug("New Promise (implicit) in mainAnalysis: getImageDataForAddress for ref candidate", addr);
-                const imgDataResult = await getImageDataForAddress(addr, `ref_cand_${addr.replace(/[^a-zA-Z0-9]/g, '')}`); // Create a safer ID
-                if (imgDataResult && imgDataResult.imageData) {
-                    allImagesToProcess.push({ ...imgDataResult, id: addr, type: 'reference_candidate' });
-                } else {
-                    logger.warn("Could not load initial image data for reference candidate:", addr);
-                }
-            }
-            if (!isCrawlingGlobal) {
-                 updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Crawling stopped by user during loading reference images..", processStatus: "Stopped - By User", progress: 0, etrString:""});
-                 return;
-            }
-
-            updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Started - Defining Reference Set", processStatus: "Started - Defining Reference Set", progress: 0.05, etrString: "" });
-            logger.debug("New Promise (implicit) in mainAnalysis: promptForReferenceSetUI");
-            const userDefinedReferences = await promptForReferenceSetUI(initialRefCandidateAddresses); // Pass full addresses
-            if (!isCrawlingGlobal) { updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Crawling stopped by user..", processStatus: "Stopped - By User", progress: 0, etrString:""}); return; }
-            if (!userDefinedReferences || (userDefinedReferences.renovated.length === 0 && userDefinedReferences.unrenovated.length === 0)) {
-                logger.error("No reference images defined by user. Aborting.");
-                updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Error - No References Defined", processStatus: "Error - No References Defined"});
-                isCrawlingGlobal = false; startButton.disabled = false; startButton.textContent = "Start Analysis"; return;
-            }
-            logger.info("User defined references collected:", userDefinedReferences);
-
-            if (!workerPoolInstance) {
-                logger.info("WorkerPool: Initializing for the first time.");
-                const workerScriptBlob = createFeatureExtractionWorkerScriptContent();
-                const workerScriptUrl = URL.createObjectURL(workerScriptBlob);
-                try {
-                    workerPoolInstance = new WorkerPool(workerScriptUrl, logger);
-                    workerPoolInstance.workers.forEach(wEntry => {
-                        wEntry.worker.postMessage({ type: 'INIT_TF_AND_CONFIG_WORKER_POOL', payload: { tfjsUrl: 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0', logConfig: WORKER_LOG_CONFIG_FOR_POOL }});
-                    });
-                } catch (e) {
-                    logger.error("Failed to create WorkerPool:", e);
-                    updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus:"Failed to create WorkerPool..", processStatus: "Error - WorkerPool Creation Failed"});
-                    isCrawlingGlobal = false; startButton.disabled = false; startButton.textContent = "Start Analysis"; return;
-                }
-            }
-            updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "WorkerPool created", processStatus: "Started - Extracting Reference Features", progress: 0.10, etrString: "" });
-
-            const referenceImagesForPool = [
-                ...userDefinedReferences.renovated.map(ref => ({...ref, classification: 'renovated', isBasePair: true})),
-                ...userDefinedReferences.unrenovated.map(ref => ({...ref, classification: 'unrenovated', isBasePair: true}))
-            ];
-
-            let processedCount = 0;
-            const totalRefsForPool = referenceImagesForPool.length;
-            logger.debug("New Promise (implicit): Processing reference images for features via WorkerPool");
-            const referenceFeaturePromises = referenceImagesForPool.map((refImg, index) => {
-                if (!isCrawlingGlobal) return Promise.resolve(null);
-                if (!refImg.imageData || !refImg.imageData.data) {
-                    logger.warn("Skipping reference image due to missing imageData:", refImg.addressQueryString);
-                    return Promise.resolve({...refImg, features: null, error: "Missing ref imageData"});
-                }
-                const imgDataForWorker = { data: refImg.imageData.data, width: refImg.imageData.width, height: refImg.imageData.height };
-                return workerPoolInstance.processImage(imgDataForWorker, refImg.addressQueryString, refImg.addressQueryString)
-                    .then(result => {
-                        processedCount++;
-                        updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Started - Ref Features", processStatus: `Started - Ref Features (${processedCount}/${totalRefsForPool})`, progress: 0.10 + (0.15 * (processedCount/totalRefsForPool)), etrString: "" });
-                        return { ...refImg, features: result.features };
-                    })
-                    .catch(error => {
-                        logger.error("Error processing reference image in pool:", refImg.addressQueryString, error);
-                        return { ...refImg, features: null, error: error.message };
-                    });
-            });
-            const processedReferences = await Promise.all(referenceFeaturePromises);
-            if (!isCrawlingGlobal) { updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Stopped - By User", processStatus: "Stopped - By User", progress: 0, etrString:""}); return;}
-
-            const validRenovatedRefs = processedReferences.filter(r => r && r.classification === 'renovated' && r.features);
-            const validUnrenovatedRefs = processedReferences.filter(r => r && r.classification === 'unrenovated' && r.features);
-
-            if (validRenovatedRefs.length === 0 || validUnrenovatedRefs.length === 0) {
-                 logger.error("Not enough valid features for both renovated and unrenovated reference centroids. Renovated:", validRenovatedRefs.length, "Unrenovated:", validUnrenovatedRefs.length);
-                 updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Not enough valid refs", processStatus: "Error - Centroid Calc Failed (Not enough valid refs)"});
-                 isCrawlingGlobal = false; startButton.disabled = false; startButton.textContent = "Start Analysis"; return;
-            }
-            renovatedCentroid = averageFeatures(validRenovatedRefs.map(r => r.features));
-            unrenovatedCentroid = averageFeatures(validUnrenovatedRefs.map(r => r.features));
-            if(!renovatedCentroid || !unrenovatedCentroid) {
-                logger.error("Failed to compute centroids from reference features.");
-                updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Centroid Computation Failed", processStatus: "Error - Centroid Computation Failed"});
-                isCrawlingGlobal = false; startButton.disabled = false; startButton.textContent = "Start Analysis"; return;
-            }
-            logger.info("Reference Centroids Calculated.");
-
-            for (const ref of [...validRenovatedRefs, ...validUnrenovatedRefs]) {
-                let buildingRecord = await getBuildingData(ref.addressQueryString) || { addressQueryString: ref.addressQueryString };
-                buildingRecord.embedding = ref.features;
-                buildingRecord.modelSignature = MODEL_SIGNATURE;
-                buildingRecord.userVerifiedStatus = ref.classification;
-                buildingRecord.userFeedbackDate = new Date().toISOString().slice(0,10).replace(/-/g,'/');
-                await saveBuildingData(buildingRecord);
-            }
-
-            updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Fetching Street Images", processStatus: "Started - Fetching Street Images", progress: 0.25, etrString: "" });
-            allImagesToProcess = [];
-            const targetStreetMetaData = await fetchImagesForStreetSection(TARGET_STREET_START_ADDRESS, TARGET_STREET_END_ADDRESS);
-            if (!isCrawlingGlobal) { updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Stopped - By User", processStatus: "Stopped - By User", progress: 0, etrString:""}); return; }
             if (!targetStreetMetaData || targetStreetMetaData.length === 0) {
                 logger.warn("No images found for target street.");
                 updateBottomStatusBar({apiKey:API_KEY, apiKeyFullStatus: "No Target Images Found", processStatus: "Error - No Target Images Found"});
-                isCrawlingGlobal = false; startButton.disabled = false; startButton.textContent = "Start Analysis"; return;
+                isCrawlingGlobal = false;
+                startButton.disabled = false;
+                startButton.textContent =
+                "Start Analysis";
+                return;
             }
             allImagesToProcess = targetStreetMetaData.map(tsm => ({ ...tsm, id: tsm.addressQueryString || `target_${Math.random().toString(16).slice(2)}`}));
-            updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Extracting Target Features", processStatus: `Started - Extracting Target Features (0/${allImagesToProcess.length})`, progress: 0.30, etrString:"" });
+            updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Started - Extracting Target Features", processStatus: `Started - Extracting Target Features (0/${allImagesToProcess.length})`, progress: 0.30, etrString:"" });
 
-            processedCount = 0;
+
+            let processedTargetCount = 0;
             const totalTargetsForPool = allImagesToProcess.length;
             let currentEtrString = "";
-            logger.debug("New Promise (implicit): Processing target images for features via WorkerPool");
+            logger.debug("New Promise (implicit): Processing target images for features via WorkerPool (main workflow)");
             const targetFeaturePromises = allImagesToProcess.map((imgMeta, index) => {
-                if (!isCrawlingGlobal) return Promise.resolve(null);
+                // ... (processImage call from v1.9, updating progress and ETR)
+                if (!isCrawlingGlobal){
+                    return Promise.resolve(null);
+                }
                 if (!imgMeta.imageData || !imgMeta.imageData.data) {
                     logger.warn("Skipping target image due to missing imageData:", imgMeta.id);
                     return Promise.resolve({...imgMeta, features: null, error: "Missing target imageData"});
@@ -2206,10 +2379,10 @@
                 const imgDataForWorker = {data: imgMeta.imageData.data, width: imgMeta.imageData.width, height: imgMeta.imageData.height};
                 return workerPoolInstance.processImage(imgDataForWorker, imgMeta.id, imgMeta.addressQueryString)
                     .then(result => {
-                        processedCount++;
-                        const progress = 0.30 + (0.60 * (processedCount / totalTargetsForPool));
+                        processedTargetCount++;
+                        const progress = 0.30 + (0.60 * (processedTargetCount / totalTargetsForPool));
                         if (workerPoolInstance.performanceData.totalImagesProcessed > 3 && workerPoolInstance.performanceData.avgTimePerImage < Infinity && workerPoolInstance.performanceData.avgTimePerImage > 0) {
-                            const remaining = totalTargetsForPool - processedCount;
+                            const remaining = totalTargetsForPool - processedTargetCount;
                             if (remaining > 0) {
                                 const etr_ms = remaining * workerPoolInstance.performanceData.avgTimePerImage;
                                 const totalSeconds = Math.round(etr_ms / 1000);
@@ -2220,25 +2393,134 @@
                                 currentEtrString = "Finishing...";
                             }
                         }
-                        updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Progressing Target Features", processStatus: `Started - Extracting Target Features (${processedCount}/${totalTargetsForPool})`, progress, etrString: currentEtrString });
-                        return { ...imgMeta, features: result.features };
+                        updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Started - Extracting Target Features", processStatus: `Started - Extracting Target Features (${processedTargetCount}/${totalTargetsForPool})`, progress, etrString: currentEtrString });
+                        return { ...imgMeta, features: result.features, imageCaptureDate: imgMeta.imageCaptureDate }; // Ensure imageCaptureDate is carried
                     })
                     .catch(error => {
                         logger.error("Error processing target image in pool:", imgMeta.addressQueryString || imgMeta.id, error);
-                        return { ...imgMeta, features: null, error: error.message };
+                        return { ...imgMeta, features: null, error: error.message, imageCaptureDate: imgMeta.imageCaptureDate };
                     });
             });
             const allProcessedTargetImageData = await Promise.all(targetFeaturePromises);
-            if (!isCrawlingGlobal) { updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Stopped - By User", processStatus: "Stopped - By User", progress: 0, etrString:""}); return; }
+            // ... (Check for stop and errors as in v1.9) ...
+            if (!isCrawlingGlobal) {
+                updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Stopped - By User", processStatus: "Stopped - By User", progress:null, etrString:""});
+                return;
+            }
 
-            updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Finalizing & Displaying", processStatus: "Started - Finalizing & Displaying", progress: 0.90, etrString: "" });
-            await processAndDisplayResultsWithKNN_Centroid(allProcessedTargetImageData);
 
-            if (isCrawlingGlobal) { updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Stopped - Completed", processStatus: "Stopped - Completed", progress: 1, etrString: ""}); }
+            updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Started - Finalizing & Displaying", processStatus: "Started - Finalizing & Displaying", progress: 0.90, etrString: "" });
+            await processAndDisplayResultsWithKNN_Centroid(allProcessedTargetImageData); // This function uses the global centroids
+
+            if (isCrawlingGlobal) {
+                updateBottomStatusBar({ apiKey: API_KEY, apiKeyFullStatus: "Stopped - Completed", processStatus: "Stopped - Completed", progress: 1, etrString: ""});
+            }
             isCrawlingGlobal = false;
             startButton.disabled = false;
             startButton.textContent = "Start Analysis";
-            logger.info("Advanced WorkerPool analysis workflow completed v"+appVersion);
+            logger.info("Advanced WorkerPool analysis workflow completed (v1.9.2).");
+        }
+
+        /**
+         * Calculates the cosine similarity between two vectors (arrays of numbers).
+         * Cosine similarity measures the cosine of the angle between two non-zero vectors,
+         * indicating their orientation similarity. Result is between -1 and 1.
+         * (1 means identical direction, 0 means orthogonal, -1 means opposite direction).
+         *
+         * @param {Array<number>} vecA - The first vector (array of numbers).
+         * @param {Array<number>} vecB - The second vector (array of numbers).
+         * @returns {number} The cosine similarity, or 0 if an error occurs (e.g., mismatched lengths, zero vector).
+         */
+        function cosineSimilarity(vecA, vecB) {
+            // logger.debug("Calculating cosine similarity. VecA length:", vecA?.length, "VecB length:", vecB?.length); // Can be too verbose
+
+            if (!vecA || !vecB || !Array.isArray(vecA) || !Array.isArray(vecB) || vecA.length !== vecB.length || vecA.length === 0) {
+                logger.warn(
+                    "cosineSimilarity: Invalid input vectors provided. VecA length:", vecA?.length, "VecB length:", vecB?.length,
+                    "IsArray A:", Array.isArray(vecA), "IsArray B:", Array.isArray(vecB)
+                );
+                return 0; // Or throw an error, depending on desired strictness
+            }
+
+            let dotProduct = 0;
+            let normA = 0;
+            let normB = 0;
+
+            for (let i = 0; i < vecA.length; i++) {
+                const valA = vecA[i] || 0; // Treat null/undefined as 0
+                const valB = vecB[i] || 0; // Treat null/undefined as 0
+                dotProduct += valA * valB;
+                normA += valA * valA;
+                normB += valB * valB;
+            }
+
+            normA = Math.sqrt(normA);
+            normB = Math.sqrt(normB);
+
+            if (normA === 0 || normB === 0) {
+                logger.debug("cosineSimilarity: One or both vectors have zero magnitude, returning 0 similarity.");
+                return 0; // Similarity with a zero vector is undefined or 0 by convention
+            }
+
+            const similarity = dotProduct / (normA * normB);
+
+            if (isNaN(similarity)) {
+                logger.warn("cosineSimilarity resulted in NaN. Inputs (first 3 vals): A=", vecA.slice(0,3), "B=", vecB.slice(0,3), "Dot:", dotProduct, "NormA:", normA, "NormB:", normB);
+                return 0; // Handle NaN case, return neutral similarity
+            }
+
+            return similarity;
+        }
+
+        /**
+         * Finds the K-nearest neighbors to a target feature vector from a list of candidate feature vectors.
+         * Uses cosine distance (1 - cosine similarity) as the distance metric.
+         *
+         * @param {Array<number>} targetFeatures - The feature vector (embedding) of the item to find neighbors for.
+         * @param {Array<object>} candidateItems - An array of candidate items. Each item must have an `embedding` property
+         *                                         (array of numbers, same dimension as targetFeatures) and typically other data like `status` or `addressQueryString`.
+         * @param {number} k - The number of nearest neighbors to return.
+         * @returns {Array<object>} An array of the k nearest neighbor objects, sorted by distance (ascending).
+         *                          Each returned neighbor object will also have a `distance` property added.
+         *                          Returns an empty array if inputs are invalid or no candidates.
+         */
+        function findKNearestNeighbors(targetFeatures, candidateItems, k) {
+            logger.debug(
+                "findKNearestNeighbors called. Target features length:", targetFeatures?.length,
+                "Number of candidates:", candidateItems?.length,
+                "k:", k
+            );
+
+            if (!targetFeatures || !Array.isArray(targetFeatures) || targetFeatures.length === 0 ||
+                !candidateItems || !Array.isArray(candidateItems) || candidateItems.length === 0 ||
+                k <= 0) {
+                logger.warn("findKNearestNeighbors: Invalid input parameters. Returning empty array.");
+                return [];
+            }
+
+            const distances = candidateItems.map(candidate => {
+                if (!candidate.embedding || !Array.isArray(candidate.embedding) || candidate.embedding.length !== targetFeatures.length) {
+                    logger.warn("findKNearestNeighbors: Skipping candidate with invalid or mismatched embedding:", candidate.addressQueryString || "Unknown Candidate");
+                    return {
+                        ...candidate,
+                        distance: Infinity // Invalid candidates are considered infinitely distant
+                    };
+                }
+                // Cosine distance = 1 - cosine similarity
+                // Similarity closer to 1 means distance closer to 0 (more similar)
+                const similarity = cosineSimilarity(targetFeatures, candidate.embedding);
+                return {
+                    ...candidate, // Include all original properties of the candidate
+                    distance: 1 - similarity
+                };
+            });
+
+            // Sort by distance (ascending - smallest distance means most similar)
+            distances.sort((a, b) => a.distance - b.distance);
+
+            const neighbors = distances.slice(0, k);
+            logger.debug("Found k-nearest neighbors:", neighbors.map(n => ({addr: n.addressQueryString, status: n.status, dist: n.distance.toFixed(3)})));
+            return neighbors;
         }
 
         async function processAndDisplayResultsWithKNN_Centroid(processedTargetImages) {
@@ -2701,9 +2983,15 @@
                         if (overlay.parentNode === document.body) {
                             document.body.removeChild(overlay);
                         }
+                        else {
+                            alert(overlay.parentNode);
+                        }
                     } catch (e) {
-                        logger.warn("Error removing swipe modal overlay, may have already been removed:", e);
+                        logger.warn("Error removing swipe modal overlay, "+
+                                    "may have already been removed:", e);
                     }
+                    // alert("prompt: "+
+                    //       collectedReferences);
                     resolveOuter(collectedReferences); // Resolve the main outer promise
                 };
 
@@ -2936,7 +3224,10 @@
 
             if (!API_KEY) {
                 logger.debug("API Key not in localStorage. User needs to act (click Register or Start).");
-                if (startButton) startButton.disabled = false;
+                if (startButton){
+                    startButton.disabled =
+                    false;
+                }
                 API_KEY = await promptForApiKey();
             }
             if(!API_KEY){
@@ -2949,15 +3240,20 @@
                 logger.debug("Attempting to setup IndexedDB post Gmaps load.");
                 updateBottomStatusBar({apiKey: API_KEY, apiKeyFullStatus: currentKeyFullStatusOnLoad, processStatus: "Initializing - Setup DB", progress: 0.02, etrString: ""});
                 await setupDB();
-                updateBottomStatusBar({apiKey: API_KEY, apiKeyFullStatus: currentKeyFullStatusOnLoad, processStatus: "Ready", progress: 0, etrString: ""});
-                if(startButton) startButton.disabled = false;
-            } catch (err) {
+                if(startButton){
+                   startButton.disabled = false;
+                }
+            }
+            catch (err) {
                 logger.debug("Error during Gmaps load or DB setup in initScript:", err);
                 const errorKeyStatus = API_KEY ? (localStorage.getItem(LOCALSTORAGE_API_KEY) ? "Registered (localStorage)" : "Session Only (Error)") : "Unregistered";
                 if (crawlingStatusSpanGlobal && !crawlingStatusSpanGlobal.textContent.includes("Gmaps Load Failed")) {
-                     updateBottomStatusBar({apiKey: API_KEY, apiKeyFullStatus: errorKeyStatus, processStatus: "Error - Initialization Failed", progress: 0, etrString: ""});
+                    updateBottomStatusBar({apiKey: API_KEY, apiKeyFullStatus: errorKeyStatus, processStatus: "Error - Initialization Failed", progress: 0, etrString: ""});
                 }
-                if(startButton) startButton.disabled = true;
+                if(startButton){
+                   startButton.disabled =
+                   true;
+                }
             }
         }
 
