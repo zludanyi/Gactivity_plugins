@@ -1,12 +1,11 @@
 // ==UserScript==
-// @name         PodCastor (v2.8 - Two-Phase Modal & Caching)
+// @name         PodCastor
 // @namespace    http://tampermonkey.net/
 // @version      2.8
 // @description  AI story generator with a modal for initial loading and a separate modal for generation.
 // @author       ZLudany
 // @match        *://*.ingatlan.com/*
 // @icon         data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==
-// @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
 // @run-at       document-end
 // ==/UserScript==
@@ -20,7 +19,7 @@
         logContainer: null,
         progressBar: null,
         progressText: null,
-        devVersion: false,
+        devVersion: true,
 
         init(container, progressBar, progressText) {
             this.logContainer = container;
@@ -168,7 +167,7 @@
             return new Promise((resolve, reject) => {
                 GenericLogger.updateProgress(0, "Downloading AI library (first time)...");
                 const client = new XMLHttpRequest();
-                client.open("GET", "https://cdn.jsdelivr.net/npm/@huggingface/transformers");
+                client.open("GET", "https://cdn.jsdelivr.net/npm/@xenova/transformers/dist/transformers.min.js");
                 client.onprogress = (pe) => {
                     if (pe.lengthComputable) {
                         const percentage = Math.round((pe.loaded / pe.total) * 100);
@@ -502,7 +501,7 @@
                 <div class="header"><h1>PodCastor 🎙️</h1><p>AI-Powered Story Generator</p></div>
                 <div class="content">
                     <label for="word-list">Enter your words (one per line):</label>
-                    <textarea id="word-list" rows="10" placeholder="undeniable\\ncreative\\nrun its course\\ninvestment\\n..."></textarea>
+                    <textarea id="word-list" rows="10" placeholder="Julianna, traveling, meet new people"></textarea>
                     <button id="generate-btn" disabled>Initializing AI...</button>
                     <div class="progress-container">
                         <progress id="llm-progress" value="0" max="100"></progress>
@@ -520,50 +519,453 @@
             this.DOM.savedStoriesList = document.getElementById('saved-stories-list');
         }
 
+        /**
+         * Injects all necessary CSS styles into the document's <head>
+         * by creating a <style> tag. This is Tampermonkey-agnostic.
+         */
         addStyles() {
+            // Use the beautified CSS from above
             const styles = `
-                body { background-color: #1c1c1e; color: #f2f2f7; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 0; }
-                #podcastor-app { max-width: 800px; margin: 40px auto; padding: 20px; background-color: #2c2c2e; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
-                .header { text-align: center; border-bottom: 1px solid #444; padding-bottom: 20px; margin-bottom: 20px; } .header h1 { margin: 0; color: #0a84ff; }
-                .content label { display: block; font-size: 16px; margin-bottom: 10px; }
-                #word-list { width: 100%; padding: 10px; background-color: #3a3a3c; border: 1px solid #555; border-radius: 8px; color: white; font-size: 1em; box-sizing: border-box; resize: vertical; margin-bottom: 15px; }
-                #generate-btn { display: block; width: 100%; padding: 15px; margin-bottom: 20px; background-color: #007aff; color: white; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; transition: background-color 0.2s; }
-                #generate-btn:hover:not(:disabled) { background-color: #0a84ff; }
-                #generate-btn:disabled { background-color: #555; cursor: not-allowed; }
-                .progress-container { margin-bottom: 20px; text-align: center; }
-                #llm-progress { width: 100%; height: 10px; border-radius: 5px; appearance: none; -webkit-appearance: none; background-color: #444; }
-                #llm-progress::-webkit-progress-bar { background-color: #444; border-radius: 5px; } #llm-progress::-webkit-progress-value { background-color: #0a84ff; border-radius: 5px; } #llm-progress::-moz-progress-bar { background-color: #0a84ff; border-radius: 5px; }
-                #llm-progress-text { display: block; margin-top: 5px; font-size: 0.9em; color: #bbb; }
-                .log-panel { margin-top: 30px; } #log-container { height: 150px; overflow-y: auto; background-color: #1c1c1e; border: 1px solid #444; border-radius: 8px; padding: 10px; font-family: 'Menlo', 'Courier New', monospace; font-size: 0.85em; }
-                #log-container p { margin: 0 0 5px; word-break: break-all; } #log-container .info { color: #50e3c2; } #log-container .error { color: #ff453a; } #log-container .log { color: #ccc; }
-                .saved-stories-panel { margin-top: 30px; } #saved-stories-list { background-color: #1c1c1e; border: 1px solid #444; border-radius: 8px; padding: 10px; min-height: 80px; max-height: 300px; overflow-y: auto; }
-                .saved-story-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #333; } .saved-story-item:last-child { border-bottom: none; }
-                .saved-story-info { flex-grow: 1; cursor: pointer; padding-right: 10px; } .saved-story-info:hover { color: #0a84ff; } .saved-story-info h4 { margin: 0; font-size: 1.1em; } .saved-story-info p { margin: 2px 0 0; font-size: 0.8em; color: #888; }
-                .saved-story-actions button { background-color: #ff453a; color: white; border: none; padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8em; transition: background-color 0.2s; margin-left: 5px; } .saved-story-actions button:hover { background-color: #ff3b30; }
-                #audio-story-container { display: none; position: fixed; bottom: 20px; right: 20px; width: 400px; max-height: 50vh; background-color: #2c2c2e; border: 1px solid #444; border-radius: 12px; z-index: 9999; flex-direction: column; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
-                #audio-story-container h2 { padding: 15px 20px; margin: 0; font-size: 18px; background-color: #3a3a3c; border-bottom: 1px solid #444; }
-                .story-config { padding: 10px 20px; border-bottom: 1px solid #444; background-color: #3a3a3c; display: flex; align-items: center; } .story-config label { margin-right: 10px; font-size: 0.9em; } #voice-select { flex-grow: 1; padding: 5px; border-radius: 6px; border: 1px solid #555; background-color: #1c1c1e; color: white; font-size: 0.9em; }
-                #story-display { padding: 20px; overflow-y: auto; flex-grow: 1; line-height: 1.6; font-size: 16px; } #story-display span.highlight { background-color: #007aff; color: white; border-radius: 3px; padding: 0 2px; }
-                #story-controls { display: flex; justify-content: center; flex-wrap: wrap; padding: 15px; background-color: #3a3a3c; border-top: 1px solid #444; align-items: center; }
-                #story-controls button { background-color: #007aff; color: white; border: none; padding: 10px 20px; margin: 5px; border-radius: 8px; cursor: pointer; font-size: 14px; transition: background-color 0.2s; }
-                #story-controls button:hover:not(:disabled) { background-color: #0a84ff; } #story-controls button:disabled { background-color: #555; cursor: not-allowed; opacity: 0.6; }
-                #story-controls #record-btn { background-color: #34c759; } #story-controls #record-btn:hover:not(:disabled) { background-color: #30d158; } #story-controls #record-btn.recording-active { animation: pulse 1.5s infinite; }
-                @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(52, 199, 89, 0); } 100% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0); } }
-                .record-status { margin-left: 10px; font-size: 0.9em; color: #a2d6a6; }
-                #story-controls #save-story-btn { background-color: #ff9f0a; } #story-controls #save-story-btn:hover:not(:disabled) { background-color: #ffb100; }
-                #download-container { padding: 10px 20px; background-color: #1c1c1e; text-align: center; border-top: 1px solid #444; }
-                .download-link { display: inline-block; padding: 10px 20px; background-color: #0a84ff; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; transition: background-color 0.2s, transform 0.2s; } .download-link:hover { background-color: #3395ff; transform: translateY(-2px); }
-                #stg-loading-dialog-zl { border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); padding: 2em; max-width: 500px; opacity: 0; transform: scaleY(0); transition: opacity 0.5s, transform 0.5s, overlay 0.5s allow-discrete, display 0.5s allow-discrete; }
-                #stg-loading-dialog-zl[open] { opacity: 1; transform: scaleY(1); }
-                @starting-style { #stg-loading-dialog-zl[open] { opacity: 0; transform: scaleY(0); } }
-                #stg-loading-dialog-zl::backdrop { background-color: transparent; transition: all 0.5s allow-discrete; }
-                #stg-loading-dialog-zl[open]::backdrop { background-color: rgb(0 0 0 / 25%); }
-                @starting-style { #stg-loading-dialog-zl[open]::backdrop { background-color: transparent; } }
-                #stg-progress-bar-zl.pulsing-progress::-webkit-progress-value, #stg-progress-bar-zl.pulsing-progress::-moz-progress-bar { background-color: #ff9f0a; }
-                progress:not([value])::-webkit-progress-value { background-color: #ff9f0a; animation: pulse-bg 2s infinite; }
-                progress:not([value])::-moz-progress-bar { background-color: #ff9f0a; animation: pulse-bg 2s infinite; }
+                body {
+                    background-color: #1c1c1e;
+                    color: #f2f2f7;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                    margin: 0;
+                    padding: 0;
+                }
+
+                #podcastor-app {
+                    max-width: 800px;
+                    margin: 40px auto;
+                    padding: 20px;
+                    background-color: #2c2c2e;
+                    border-radius: 12px;
+                    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+                }
+
+                body {
+                    background-color: #1c1c1e;
+                    color: #f2f2f7;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                    margin: 0;
+                    padding: 0;
+                }
+
+                #podcastor-app {
+                    max-width: 800px;
+                    margin: 40px auto;
+                    padding: 20px;
+                    background-color: #2c2c2e;
+                    border-radius: 12px;
+                    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+                }
+
+                .header {
+                    text-align: center;
+                    border-bottom: 1px solid #444;
+                    padding-bottom: 20px;
+                    margin-bottom: 20px;
+                }
+
+                .header h1 {
+                    margin: 0;
+                    color: #0a84ff;
+                }
+
+                .content label {
+                    display: block;
+                    font-size: 16px;
+                    margin-bottom: 10px;
+                }
+
+                #word-list {
+                    width: 100%;
+                    padding: 10px;
+                    background-color: #3a3a3c;
+                    border: 1px solid #555;
+                    border-radius: 8px;
+                    color: white;
+                    font-size: 1em;
+                    box-sizing: border-box;
+                    resize: vertical;
+                    margin-bottom: 15px;
+                }
+
+                #generate-btn {
+                    display: block;
+                    width: 100%;
+                    padding: 15px;
+                    margin-bottom: 20px;
+                    background-color: #007aff;
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    font-size: 18px;
+                    font-weight: bold;
+                    cursor: pointer;
+                    transition: background-color 0.2s;
+                }
+
+                #generate-btn:hover:not(:disabled) {
+                    background-color: #0a84ff;
+                }
+
+                #generate-btn:disabled {
+                    background-color: #555;
+                    cursor: not-allowed;
+                }
+
+                .progress-container {
+                    margin-bottom: 20px;
+                    text-align: center;
+                }
+
+                #llm-progress {
+                    width: 100%;
+                    height: 10px;
+                    border-radius: 5px;
+                    appearance: none;
+                    -webkit-appearance: none;
+                    background-color: #444;
+                }
+
+                #llm-progress::-webkit-progress-bar {
+                    background-color: #444;
+                    border-radius: 5px;
+                }
+
+                #llm-progress::-webkit-progress-value {
+                    background-color: #0a84ff;
+                    border-radius: 5px;
+                }
+
+                #llm-progress::-moz-progress-bar {
+                    background-color: #0a84ff;
+                    border-radius: 5px;
+                }
+
+                #llm-progress-text {
+                    display: block;
+                    margin-top: 5px;
+                    font-size: 0.9em;
+                    color: #bbb;
+                }
+
+                .log-panel {
+                    margin-top: 30px;
+                }
+
+                #log-container {
+                    height: 150px;
+                    overflow-y: auto;
+                    background-color: #1c1c1e;
+                    border: 1px solid #444;
+                    border-radius: 8px;
+                    padding: 10px;
+                    font-family: 'Menlo', 'Courier New', monospace;
+                    font-size: 0.85em;
+                    user-select: text;
+                    -webkit-user-select: text;
+                }
+
+                #log-container p {
+                    margin: 0 0 5px;
+                    word-break: break-all;
+                }
+
+                #log-container .info {
+                    color: #50e3c2;
+                }
+
+                #log-container .error {
+                    color: #ff453a;
+                }
+
+                #log-container .log {
+                    color: #ccc;
+                }
+
+                .saved-stories-panel {
+                    margin-top: 30px;
+                }
+
+                #saved-stories-list {
+                    background-color: #1c1c1e;
+                    border: 1px solid #444;
+                    border-radius: 8px;
+                    padding: 10px;
+                    min-height: 80px;
+                    max-height: 300px;
+                    overflow-y: auto;
+                }
+
+                .saved-story-item {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 8px 0;
+                    border-bottom: 1px solid #333;
+                }
+
+                .saved-story-item:last-child {
+                    border-bottom: none;
+                }
+
+                .saved-story-info {
+                    flex-grow: 1;
+                    cursor: pointer;
+                    padding-right: 10px;
+                }
+
+                .saved-story-info:hover {
+                    color: #0a84ff;
+                }
+
+                .saved-story-info h4 {
+                    margin: 0;
+                    font-size: 1.1em;
+                }
+
+                .saved-story-info p {
+                    margin: 2px 0 0;
+                    font-size: 0.8em;
+                    color: #888;
+                }
+
+                .saved-story-actions button {
+                    background-color: #ff453a;
+                    color: white;
+                    border: none;
+                    padding: 5px 10px;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    font-size: 0.8em;
+                    transition: background-color 0.2s;
+                    margin-left: 5px;
+                }
+
+                .saved-story-actions button:hover {
+                    background-color: #ff3b30;
+                }
+
+                #audio-story-container {
+                    display: none;
+                    position: fixed;
+                    bottom: 20px;
+                    right: 20px;
+                    width: 400px;
+                    max-height: 50vh;
+                    background-color: #2c2c2e;
+                    border: 1px solid #444;
+                    border-radius: 12px;
+                    z-index: 9999;
+                    flex-direction: column;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+                }
+
+                #audio-story-container h2 {
+                    padding: 15px 20px;
+                    margin: 0;
+                    font-size: 18px;
+                    background-color: #3a3a3c;
+                    border-bottom: 1px solid #444;
+                }
+
+                .story-config {
+                    padding: 10px 20px;
+                    border-bottom: 1px solid #444;
+                    background-color: #3a3a3c;
+                    display: flex;
+                    align-items: center;
+                }
+
+                .story-config label {
+                    margin-right: 10px;
+                    font-size: 0.9em;
+                }
+
+                #voice-select {
+                    flex-grow: 1;
+                    padding: 5px;
+                    border-radius: 6px;
+                    border: 1px solid #555;
+                    background-color: #1c1c1e;
+                    color: white;
+                    font-size: 0.9em;
+                }
+
+                #story-display {
+                    padding: 20px;
+                    overflow-y: auto;
+                    flex-grow: 1;
+                    line-height: 1.6;
+                    font-size: 16px;
+                }
+
+                #story-display span.highlight {
+                    background-color: #007aff;
+                    color: white;
+                    border-radius: 3px;
+                    padding: 0 2px;
+                }
+
+                #story-controls {
+                    display: flex;
+                    justify-content: center;
+                    flex-wrap: wrap;
+                    padding: 15px;
+                    background-color: #3a3a3c;
+                    border-top: 1px solid #444;
+                    align-items: center;
+                }
+
+                #story-controls button {
+                    background-color: #007aff;
+                    color: white;
+                    border: none;
+                    padding: 10px 20px;
+                    margin: 5px;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    font-size: 14px;
+                    transition: background-color 0.2s;
+                }
+
+                #story-controls button:hover:not(:disabled) {
+                    background-color: #0a84ff;
+                }
+
+                #story-controls button:disabled {
+                    background-color: #555;
+                    cursor: not-allowed;
+                    opacity: 0.6;
+                }
+
+                #story-controls #record-btn {
+                    background-color: #34c759;
+                }
+
+                #story-controls #record-btn:hover:not(:disabled) {
+                    background-color: #30d158;
+                }
+
+                #story-controls #record-btn.recording-active {
+                    animation: pulse 1.5s infinite;
+                }
+
+                @keyframes pulse {
+                    0% {
+                        box-shadow: 0 0 0 0 rgba(52, 199, 89, 0.7);
+                    }
+                    70% {
+                        box-shadow: 0 0 0 10px rgba(52, 199, 89, 0);
+                    }
+                    100% {
+                        box-shadow: 0 0 0 0 rgba(52, 199, 89, 0);
+                    }
+                }
+
+                .record-status {
+                    margin-left: 10px;
+                    font-size: 0.9em;
+                    color: #a2d6a6;
+                }
+
+                #story-controls #save-story-btn {
+                    background-color: #ff9f0a;
+                }
+
+                #story-controls #save-story-btn:hover:not(:disabled) {
+                    background-color: #ffb100;
+                }
+
+                #download-container {
+                    padding: 10px 20px;
+                    background-color: #1c1c1e;
+                    text-align: center;
+                    border-top: 1px solid #444;
+                }
+
+                .download-link {
+                    display: inline-block;
+                    padding: 10px 20px;
+                    background-color: #0a84ff;
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 8px;
+                    font-weight: bold;
+                    transition: background-color 0.2s, transform 0.2s;
+                }
+
+                .download-link:hover {
+                    background-color: #3395ff;
+                    transform: translateY(-2px);
+                }
+
+                #stg-loading-dialog-zl {
+                    border: 1px solid #ccc;
+                    border-radius: 8px;
+                    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+                    padding: 2em;
+                    max-width: 500px;
+                    opacity: 0;
+                    transform: scaleY(0);
+                    transition:
+                        opacity 0.5s ease-out,
+                        transform 0.5s ease-out,
+                        overlay 0.5s ease-out allow-discrete,
+                        display 0.5s ease-out allow-discrete;
+                }
+
+                #stg-loading-dialog-zl[open] {
+                    opacity: 1;
+                    transform: scaleY(1);
+                }
+
+                @starting-style {
+                    #stg-loading-dialog-zl[open] {
+                        opacity: 0;
+                        transform: scaleY(0);
+                    }
+                }
+
+                #stg-loading-dialog-zl::backdrop {
+                    background-color: transparent;
+                    transition: all 0.5s allow-discrete;
+                }
+
+                #stg-loading-dialog-zl[open]::backdrop {
+                    background-color: rgb(0 0 0 / 25%);
+                }
+
+                @starting-style {
+                    #stg-loading-dialog-zl[open]::backdrop {
+                        background-color: transparent;
+                    }
+                }
+
+                #stg-progress-bar-zl.pulsing-progress::-webkit-progress-value,
+                #stg-progress-bar-zl.pulsing-progress::-moz-progress-bar {
+                    background-color: #ff9f0a;
+                }
+
+                progress:not([value])::-webkit-progress-value {
+                    background-color: #ff9f0a;
+                    animation: pulse-bg 2s infinite;
+                }
+
+                progress:not([value])::-moz-progress-bar {
+                    background-color: #ff9f0a;
+                    animation: pulse-bg 2s infinite;
+                }
             `;
-            GM_addStyle(styles);
+
+            const styleSheet = document.createElement("style");
+            styleSheet.id = "podcastor-styles"; // Add an ID for easy inspection
+            styleSheet.innerText = styles;
+            document.head.appendChild(styleSheet);
+
+            GenericLogger.info("Native CSS styles injected into document head.", "System");
         }
 
         setupEventListeners() {
@@ -584,9 +986,7 @@
 
             this.DOM.generateBtn.disabled = true;
             this.DOM.generateBtn.textContent = 'Generating...';
-            
             const story = await this.storyGenerator.generateStory(wordList);
-
             this.DOM.generateBtn.disabled = false;
             this.DOM.generateBtn.textContent = 'Generate Story';
 
