@@ -84,30 +84,160 @@
     // ==========================================
     const styles = `
         /* Stamp & Bubble */
-        #renovision-stamp{position:fixed;bottom:20px;right:20px;z-index:2147483647;cursor:pointer;font-size:24px;user-select:none;-webkit-tap-highlight-color:transparent;}
-        #renovision-stamp:hover .rv-bubble, #renovision-stamp:active .rv-bubble{opacity:1;transform:scale(1);}
-        .rv-bubble{position:absolute;bottom:60px;right:0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:20px;padding:16px;min-width:180px;opacity:0;transform:scale(0.9);transition:all .3s cubic-bezier(.175,.885,.32,1.275);box-shadow:0 10px 30px rgba(0,0,0,.3);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.2);font-family:-apple-system,system-ui,sans-serif;}
-        .rv-stats{font-size:14px;color:#fff;margin-bottom:8px;font-weight:600;text-align:center;}
-        .rv-hands{display:flex;gap:12px;justify-content:center;margin-bottom:8px;}
-        .rv-hands button{width:48px;height:48px;border-radius:50%;border:none;background:rgba(255,255,255,.2);color:#fff;font-size:20px;cursor:pointer;transition:all .2s;}
-        .rv-hands button:active{background:rgba(255,255,255,.4);transform:scale(1.1);}
-        .rv-hands button:disabled{opacity:.5;cursor:not-allowed;}
-        #signin-btn,.rv-status{font-size:12px;color:rgba(255,255,255,.9);background:none;border:none;cursor:pointer;width:100%;text-align:center;}
-        .rv-status{margin-top:4px;font-size:11px;}
-        /* Modal Overlay */
-        .rv-modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:2147483647;opacity:0;pointer-events:none;transition:opacity .2s ease-in-out;}
-        .rv-modal-overlay.rv-active{opacity:1;pointer-events:auto;}
-        .rv-modal{background:#fff;border-radius:12px;padding:24px;width:90%;max-width:320px;box-shadow:0 10px 30px rgba(0,0,0,0.5);transform:translateY(20px);transition:transform .2s ease-in-out;font-family:-apple-system,system-ui,sans-serif;}
-        .rv-modal-overlay.rv-active .rv-modal{transform:translateY(0);}
-        .rv-modal h3{margin:0 0 12px 0;font-size:18px;color:#333;}
-        .rv-modal p{margin:0 0 16px 0;font-size:14px;color:#666;}
-        .rv-modal input{width:100%;box-sizing:border-box;padding:10px;margin-bottom:20px;border:1px solid #ccc;border-radius:6px;font-size:16px;outline:none;}
-        .rv-modal input:focus{border-color:#667eea;}
-        .rv-modal-actions{display:flex;justify-content:flex-end;gap:10px;}
-        .rv-modal button{padding:8px 16px;border:none;border-radius:6px;font-size:14px;cursor:pointer;font-weight:600;}
-        .rv-modal-cancel{background:#eee;color:#555;}
-        .rv-modal-submit{background:#667eea;color:#fff;}
-    `;
+        #renovision-stamp{
+position:fixed;
+bottom:20px;
+right:20px;
+z-index:2147483647;
+cursor:pointer;
+font-size:24px;
+user-select:none;
+-webkit-tap-highlight-color:transparent;
+}
+#renovision-stamp:hover .rv-bubble, #renovision-stamp:active .rv-bubble{
+opacity:1;
+transform:scale(1);
+}
+.rv-bubble{
+position:absolute;
+bottom:60px;
+right:0;
+background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
+border-radius:20px;
+padding:16px;
+min-width:180px;
+opacity:0;
+transform:scale(0.9);
+transition:all .3s cubic-bezier(.175,.885,.32,1.275);
+box-shadow:0 10px 30px rgba(0,0,0,.3);
+backdrop-filter:blur(10px);
+border:1px solid rgba(255,255,255,.2);
+font-family:-apple-system,system-ui,sans-serif;
+}
+.rv-stats{
+font-size:14px;
+color:#fff;
+margin-bottom:8px;
+font-weight:600;
+text-align:center;
+}
+.rv-hands{
+display:flex;
+gap:12px;
+justify-content:center;
+margin-bottom:8px;
+}
+.rv-hands button{
+width:48px;
+height:48px;
+border-radius:50%;
+border:none;
+background:rgba(255,255,255,.2);
+color:#fff;
+font-size:20px;
+cursor:pointer;
+transition:all .2s;
+}
+.rv-hands button:active{
+background:rgba(255,255,255,.4);
+transform:scale(1.1);
+}
+.rv-hands button:disabled{
+opacity:.5;
+cursor:not-allowed;
+}
+#signin-btn,.rv-status{
+font-size:12px;
+color:rgba(255,255,255,.9);
+background:none;
+border:none;
+cursor:pointer;
+width:100%;
+text-align:center;
+}
+.rv-status{
+margin-top:4px;
+font-size:11px;
+}
+/* Modal Overlay */
+.rv-modal-overlay{
+position:fixed;
+top:0;
+left:0;
+right:0;
+bottom:0;
+background:rgba(0,0,0,0.6);
+display:flex;
+align-items:center;
+justify-content:center;
+z-index:2147483647;
+opacity:0;
+pointer-events:none;
+transition:opacity .2s ease-in-out;
+}
+.rv-modal-overlay.rv-active{
+opacity:1;
+pointer-events:auto;
+}
+.rv-modal{
+background:#fff;
+border-radius:12px;
+padding:24px;
+width:90%;
+max-width:320px;
+box-shadow:0 10px 30px rgba(0,0,0,0.5);
+transform:translateY(20px);
+transition:transform .2s ease-in-out;
+font-family:-apple-system,system-ui,sans-serif;
+}
+.rv-modal-overlay.rv-active .rv-modal{
+transform:translateY(0);
+}
+.rv-modal h3{
+margin:0 0 12px 0;
+font-size:18px;
+color:#333;
+}
+.rv-modal p{
+margin:0 0 16px 0;
+font-size:14px;
+color:#666;
+}
+.rv-modal input{
+width:100%;
+box-sizing:border-box;
+padding:10px;
+margin-bottom:20px;
+border:1px solid #ccc;
+border-radius:6px;
+font-size:16px;
+outline:none;
+}
+.rv-modal input:focus{
+border-color:#667eea;
+}
+.rv-modal-actions{
+display:flex;
+justify-content:flex-end;
+gap:10px;
+}
+.rv-modal button{
+padding:8px 16px;
+border:none;
+border-radius:6px;
+font-size:14px;
+cursor:pointer;
+font-weight:600;
+}
+.rv-modal-cancel{
+background:#eee;
+color:#555;
+}
+.rv-modal-submit{
+background:#667eea;
+color:#fff;
+}
+`;
     function injectCSS() {
         Logger.info('UI', 'injectCSS() called.');
         if (document.getElementById('rv-styles')) {
