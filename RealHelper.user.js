@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Renovision - P2P real helper
 // @namespace    http://renovision.app/
-// @version      1.2
+// @version      1.3
 // @description  Anonymous p2p real estate validation network for ingatlan.com
 // @author       ZLudany
 // @match        https://ingatlan.com/*
@@ -33,21 +33,36 @@
         devMode: false
     };
     class Logger {
-        static info(context, message, data = '') {
+        static _logToUI(level, context, message, data = '') {
             if (!CONFIG.devMode) return;
-            console.log(`%c[Renovision][${context}]%c ${message}`, 'color: #667eea; font-weight: bold;', 'color: inherit;', data);
+            const consoleLogs = document.getElementById('rv-console-logs');
+            if (!consoleLogs) return;
+            const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: "numeric", minute: "numeric", second: "numeric" });
+            let dataStr = '';
+            if (data) {
+                try {
+                    dataStr = typeof data === 'object' ? JSON.stringify(data) : String(data);
+                } catch (e) {
+                    dataStr = '[Unserializable Object]';
+                }
+            }
+            const line = document.createElement('div');
+            line.className = `rv-log-line rv-log-${level}`;
+            line.innerHTML = `<span class="rv-log-time">[${time}]</span><span class="rv-log-context">[${context}]</span> ${message} <span class="rv-log-data">${dataStr}</span>`;
+            consoleLogs.appendChild(line);
+            consoleLogs.scrollTop = consoleLogs.scrollHeight;
+        }
+        static info(context, message, data = '') {
+            this._logToUI('info', context, message, data);
         }
         static warn(context, message, data = '') {
-            if (!CONFIG.devMode) return;
-            console.warn(`[Renovision][${context}] ${message}`, data);
+            this._logToUI('warn', context, message, data);
         }
         static error(context, message, error = '') {
-            if (!CONFIG.devMode) return;
-            console.error(`[Renovision][${context}] ${message}`, error);
+            this._logToUI('error', context, message, error);
         }
         static trace(context, message) {
-            if (!CONFIG.devMode) return;
-            console.trace(`[Renovision][${context}] ${message}`);
+            this._logToUI('info', context, `[TRACE] ${message}`);
         }
     }
     // ==========================================
@@ -55,7 +70,7 @@
     // ==========================================
     function getPropertyId() {
         Logger.info('Utility', 'getPropertyId() called.');
-        const match = window.location.href.match(/\/(\d+)/);
+        const match = window.location.href.match(//(d+)/);
         return match ? match[1] : null;
     }
     function loadScript(src, globalVarName) {
@@ -83,8 +98,8 @@
     // UI & CSS INJECTION
     // ==========================================
     const styles = `
-        /* Stamp & Bubble */
-        #renovision-stamp{
+/* Stamp & Bubble */
+#renovision-stamp{
 position:fixed;
 bottom:20px;
 right:20px;
@@ -237,6 +252,71 @@ color:#555;
 background:#667eea;
 color:#fff;
 }
+/* UI Console Emulator */
+#rv-console{
+position:fixed;
+bottom:0;
+left:0;
+width:100%;
+height:30vh;
+background:rgba(0,0,0,0.95);
+color:#0f0;
+font-family:monospace;
+font-size:11px;
+z-index:2147483646;
+display:none;
+flex-direction:column;
+border-top:2px solid #667eea;
+box-shadow:0 -5px 20px rgba(0,0,0,0.5);
+}
+#rv-console.rv-active{
+display:flex;
+}
+#rv-console-header{
+padding:5px 10px;
+background:#222;
+color:#fff;
+display:flex;
+justify-content:space-between;
+align-items:center;
+border-bottom:1px solid #444;
+font-weight:bold;
+font-family:-apple-system,system-ui,sans-serif;
+}
+#rv-console-logs{
+flex:1;
+overflow-y:auto;
+padding:10px;
+margin:0;
+word-wrap:break-word;
+}
+.rv-log-line{
+margin-bottom:4px;
+border-bottom:1px solid rgba(255,255,255,0.05);
+padding-bottom:2px;
+line-height:1.4;
+}
+.rv-log-info{
+color:#5bc0de;
+}
+.rv-log-warn{
+color:#f0ad4e;
+}
+.rv-log-error{
+color:#d9534f;
+font-weight:bold;
+}
+.rv-log-time{
+color:#888;
+margin-right:5px;
+}
+.rv-log-context{
+color:#c678dd;
+margin-right:5px;
+}
+.rv-log-data{
+color:#98c379;
+}
 `;
     function injectCSS() {
         Logger.info('UI', 'injectCSS() called.');
@@ -273,12 +353,29 @@ color:#fff;
             </div>
         `;
         document.body.appendChild(stamp);
-        Logger.info('UI', 'Main UI element appended to document body.');
+        const consoleEl = document.createElement('div');
+        consoleEl.id = 'rv-console';
+        consoleEl.innerHTML = `
+            <div id="rv-console-header">
+                <span>Renovision Dev Console</span>
+                <button id="rv-console-clear" style="background:#444;color:#fff;border:none;padding:2px 6px;border-radius:4px;cursor:pointer;">Clear</button>
+            </div>
+            <div id="rv-console-logs"></div>
+        `;
+        document.body.appendChild(consoleEl);
+        document.getElementById('rv-console-clear').addEventListener('click', () => {
+            document.getElementById('rv-console-logs').innerHTML = '';
+            Logger.info('System', 'Console cleared.');
+        });
+        Logger.info('UI', 'Main UI elements appended to document body.');
         document.getElementById('rv-dev-toggle').addEventListener('change', (e) => {
             CONFIG.devMode = e.target.checked;
+            const uiConsole = document.getElementById('rv-console');
             if (CONFIG.devMode) {
-                console.log("%c[Renovision] Developer Mode ENABLED", "color: #28a745; font-weight: bold;");
-                Logger.info('Core', 'Logging started.');
+                uiConsole.classList.add('rv-active');
+                Logger.info('System', 'Developer Mode ENABLED - On-Screen Console Active');
+            } else {
+                uiConsole.classList.remove('rv-active');
             }
         });
         return stamp;
