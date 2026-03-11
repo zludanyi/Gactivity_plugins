@@ -11,10 +11,8 @@
 // @require      https://d3js.org/d3-drag.v3.min.js
 // @require      https://d3js.org/d3-zoom.v3.min.js
 // ==/UserScript==
-
 (function() {
     'use strict';
-
     // --- Configuration ---
     const PARENT_DEV_MODE = false; // Log level for the main userscript (true=alert, false=console)
     const WORKER_DEV_MODE = true;  // Log level for the Web Worker script (true=alert request, false=console request)
