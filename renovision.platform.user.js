@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Renovision - P2P real estate validator
+// @name         P2P real estate validator
 // @namespace    http://renovision.app/
 // @version      1.4
 // @description  Anonymous p2p real estate validation network for ingatlan.com
@@ -34,7 +34,7 @@
             'initRealtime': 'onAuthStateChangedHandler',
             'requestBounty': 'public', 
             'submitScout': 'public', 
-            'processRenovisionState': ['bootRenovision', 'onHashChangeHandler', 'onHydrateMessageHandler'],
+            'processRenovisionState': ['bootRenovision', 'onHashChangeHandler', 'onHydrateMessageHandler', 'onDOMLoadedHandler'],
             'promptAsync': ['requestBounty', 'submitScout'] 
         },
 
@@ -143,7 +143,6 @@
             }
             const line = document.createElement('div');
             line.className = 'rv-log-line rv-log-' + level;
-            // Message string replaces newlines with <br> for HTML rendering
             const htmlMessage = message.replace(/
 /g, '<br>');
             line.innerHTML = '<span class="rv-log-time">[' + time + ']</span><span class="rv-log-context">[' + context + ']</span> ' + htmlMessage + ' <span class="rv-log-data">' + dataStr + '</span>';
@@ -225,231 +224,49 @@
         });
     }
 
+    // --- END OF PART 1. PASTE PART 2 BELOW THIS LINE ---
+
+    // --- START OF PART 2 ---
+
     // ==========================================
     // UI & CSS INJECTION
     // ==========================================
     
     const styles = `
-/* Stamp & Bubble */
-#renovision-stamp{
-position:fixed;
-bottom:20px;
-right:20px;
-z-index:2147483647;
-cursor:pointer;
-font-size:24px;
-user-select:none;
--webkit-tap-highlight-color:transparent;
-}
-#renovision-stamp:hover .rv-bubble, #renovision-stamp:active .rv-bubble{
-opacity:1;
-transform:scale(1);
-}
-.rv-bubble{
-position:absolute;
-bottom:60px;
-right:0;
-background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
-border-radius:20px;
-padding:16px;
-min-width:180px;
-opacity:0;
-transform:scale(0.9);
-transition:all .3s cubic-bezier(.175,.885,.32,1.275);
-box-shadow:0 10px 30px rgba(0,0,0,.3);
-backdrop-filter:blur(10px);
-border:1px solid rgba(255,255,255,.2);
-font-family:-apple-system,system-ui,sans-serif;
-}
-.rv-stats{
-font-size:14px;
-color:#fff;
-margin-bottom:8px;
-font-weight:600;
-text-align:center;
-}
-.rv-hands{
-display:flex;
-gap:12px;
-justify-content:center;
-margin-bottom:8px;
-}
-.rv-hands button{
-width:48px;
-height:48px;
-border-radius:50%;
-border:none;
-background:rgba(255,255,255,.2);
-color:#fff;
-font-size:20px;
-cursor:pointer;
-transition:all .2s;
-}
-.rv-hands button:active{
-background:rgba(255,255,255,.4);
-transform:scale(1.1);
-}
-.rv-hands button:disabled{
-opacity:.5;
-cursor:not-allowed;
-}
-#signin-btn,.rv-status{
-font-size:12px;
-color:rgba(255,255,255,.9);
-background:none;
-border:none;
-cursor:pointer;
-width:100%;
-text-align:center;
-}
-.rv-status{
-margin-top:4px;
-font-size:11px;
-}
-/* Modal Overlay */
-.rv-modal-overlay{
-position:fixed;
-top:0;
-left:0;
-right:0;
-bottom:0;
-background:rgba(0,0,0,0.6);
-display:flex;
-align-items:center;
-justify-content:center;
-z-index:2147483647;
-opacity:0;
-pointer-events:none;
-transition:opacity .2s ease-in-out;
-}
-.rv-modal-overlay.rv-active{
-opacity:1;
-pointer-events:auto;
-}
-.rv-modal{
-background:#fff;
-border-radius:12px;
-padding:24px;
-width:90%;
-max-width:320px;
-box-shadow:0 10px 30px rgba(0,0,0,0.5);
-transform:translateY(20px);
-transition:transform .2s ease-in-out;
-font-family:-apple-system,system-ui,sans-serif;
-}
-.rv-modal-overlay.rv-active .rv-modal{
-transform:translateY(0);
-}
-.rv-modal h3{
-margin:0 0 12px 0;
-font-size:18px;
-color:#333;
-}
-.rv-modal p{
-margin:0 0 16px 0;
-font-size:14px;
-color:#666;
-}
-.rv-modal input{
-width:100%;
-box-sizing:border-box;
-padding:10px;
-margin-bottom:20px;
-border:1px solid #ccc;
-border-radius:6px;
-font-size:16px;
-outline:none;
-}
-.rv-modal input:focus{
-border-color:#667eea;
-}
-.rv-modal-actions{
-display:flex;
-justify-content:flex-end;
-gap:10px;
-}
-.rv-modal button{
-padding:8px 16px;
-border:none;
-border-radius:6px;
-font-size:14px;
-cursor:pointer;
-font-weight:600;
-}
-.rv-modal-cancel{
-background:#eee;
-color:#555;
-}
-.rv-modal-submit{
-background:#667eea;
-color:#fff;
-}
-/* UI Console Emulator */
-#rv-console{
-position:fixed;
-bottom:0;
-left:0;
-width:100%;
-height:30vh;
-background:rgba(0,0,0,0.95);
-color:#0f0;
-font-family:monospace;
-font-size:11px;
-z-index:2147483646;
-display:none;
-flex-direction:column;
-border-top:2px solid #667eea;
-box-shadow:0 -5px 20px rgba(0,0,0,0.5);
-}
-#rv-console.rv-active{
-display:flex;
-}
-#rv-console-header{
-padding:5px 10px;
-background:#222;
-color:#fff;
-display:flex;
-justify-content:space-between;
-align-items:center;
-border-bottom:1px solid #444;
-font-weight:bold;
-font-family:-apple-system,system-ui,sans-serif;
-}
-#rv-console-logs{
-flex:1;
-overflow-y:auto;
-padding:10px;
-margin:0;
-word-wrap:break-word;
-}
-.rv-log-line{
-margin-bottom:4px;
-border-bottom:1px solid rgba(255,255,255,0.05);
-padding-bottom:2px;
-line-height:1.4;
-}
-.rv-log-info{
-color:#5bc0de;
-}
-.rv-log-warn{
-color:#f0ad4e;
-}
-.rv-log-error{
-color:#d9534f;
-font-weight:bold;
-}
-.rv-log-time{
-color:#888;
-margin-right:5px;
-}
-.rv-log-context{
-color:#c678dd;
-margin-right:5px;
-}
-.rv-log-data{
-color:#98c379;
-}
-`;
+#renovision-stamp{position:fixed;bottom:20px;right:20px;z-index:2147483647;cursor:pointer;font-size:24px;user-select:none;-webkit-tap-highlight-color:transparent;}
+#renovision-stamp:hover .rv-bubble, #renovision-stamp:active .rv-bubble{opacity:1;transform:scale(1);}
+.rv-bubble{position:absolute;bottom:60px;right:0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:20px;padding:16px;min-width:180px;opacity:0;transform:scale(0.9);transition:all .3s cubic-bezier(.175,.885,.32,1.275);box-shadow:0 10px 30px rgba(0,0,0,.3);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.2);font-family:-apple-system,system-ui,sans-serif;}
+.rv-stats{font-size:14px;color:#fff;margin-bottom:8px;font-weight:600;text-align:center;}
+.rv-hands{display:flex;gap:12px;justify-content:center;margin-bottom:8px;}
+.rv-hands button{width:48px;height:48px;border-radius:50%;border:none;background:rgba(255,255,255,.2);color:#fff;font-size:20px;cursor:pointer;transition:all .2s;}
+.rv-hands button:active{background:rgba(255,255,255,.4);transform:scale(1.1);}
+.rv-hands button:disabled{opacity:.5;cursor:not-allowed;}
+#signin-btn,.rv-status{font-size:12px;color:rgba(255,255,255,.9);background:none;border:none;cursor:pointer;width:100%;text-align:center;}
+.rv-status{margin-top:4px;font-size:11px;}
+.rv-modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:2147483647;opacity:0;pointer-events:none;transition:opacity .2s ease-in-out;}
+.rv-modal-overlay.rv-active{opacity:1;pointer-events:auto;}
+.rv-modal{background:#fff;border-radius:12px;padding:24px;width:90%;max-width:320px;box-shadow:0 10px 30px rgba(0,0,0,0.5);transform:translateY(20px);transition:transform .2s ease-in-out;font-family:-apple-system,system-ui,sans-serif;}
+.rv-modal-overlay.rv-active .rv-modal{transform:translateY(0);}
+.rv-modal h3{margin:0 0 12px 0;font-size:18px;color:#333;}
+.rv-modal p{margin:0 0 16px 0;font-size:14px;color:#666;}
+.rv-modal input{width:100%;box-sizing:border-box;padding:10px;margin-bottom:20px;border:1px solid #ccc;border-radius:6px;font-size:16px;outline:none;}
+.rv-modal input:focus{border-color:#667eea;}
+.rv-modal-actions{display:flex;justify-content:flex-end;gap:10px;}
+.rv-modal button{padding:8px 16px;border:none;border-radius:6px;font-size:14px;cursor:pointer;font-weight:600;}
+.rv-modal-cancel{background:#eee;color:#555;}
+.rv-modal-submit{background:#667eea;color:#fff;}
+#rv-console{position:fixed;bottom:0;left:0;width:100%;height:30vh;background:rgba(0,0,0,0.95);color:#0f0;font-family:monospace;font-size:11px;z-index:2147483646;display:none;flex-direction:column;border-top:2px solid #667eea;box-shadow:0 -5px 20px rgba(0,0,0,0.5);}
+#rv-console.rv-active{display:flex;}
+#rv-console-header{padding:5px 10px;background:#222;color:#fff;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #444;font-weight:bold;font-family:-apple-system,system-ui,sans-serif;}
+#rv-console-logs{flex:1;overflow-y:auto;padding:10px;margin:0;word-wrap:break-word;}
+.rv-log-line{margin-bottom:4px;border-bottom:1px solid rgba(255,255,255,0.05);padding-bottom:2px;line-height:1.4;}
+.rv-log-info{color:#5bc0de;}
+.rv-log-warn{color:#f0ad4e;}
+.rv-log-error{color:#d9534f;font-weight:bold;}
+.rv-log-time{color:#888;margin-right:5px;}
+.rv-log-context{color:#c678dd;margin-right:5px;}
+.rv-log-data{color:#98c379;}
+    `;
 
     function injectCSS() {
         window.__RENOVISION__.isAccessible('injectCSS');
@@ -468,9 +285,7 @@ color:#98c379;
         stamp.id = 'renovision-stamp';
         stamp.innerHTML = `
             <div class="rv-bubble">
-                <div class="rv-stats">
-                    <span id="requests-count">0</span> 🫱 &nbsp; 🫲 <span id="scouts-count">0</span>
-                </div>
+                <div class="rv-stats"><span id="requests-count">0</span> 🫱 &nbsp; 🫲 <span id="scouts-count">0</span></div>
                 <div class="rv-hands">
                     <button id="request-btn" title="Request Address">🫱</button>
                     <button id="scout-btn" title="Scout Address">🫲</button>
@@ -588,4 +403,224 @@ color:#98c379;
                 closeAndResolve(null);
             };
             btnSubmit.onclick = function onSubmitClick() {
-                window.__RENOVISION__.
+                window.__RENOVISION__.isAccessible('onSubmitClick');
+                window.__RENOVISION__.argsCache('onSubmitClick', arguments, this);
+                closeAndResolve(input.value);
+            };
+            input.onkeydown = function onInputKeyDown(e) {
+                window.__RENOVISION__.isAccessible('onInputKeyDown');
+                window.__RENOVISION__.argsCache('onInputKeyDown', arguments, this);
+                if (e.key === 'Enter') closeAndResolve(input.value);
+                if (e.key === 'Escape') closeAndResolve(null);
+            };
+        });
+    }
+
+    // ==========================================
+    // FIREBASE & STRIPE INITIALIZATION
+    // ==========================================
+    
+    async function initDependencies() {
+        window.__RENOVISION__.isAccessible('initDependencies');
+        window.__RENOVISION__.argsCache('initDependencies', arguments, this);
+        try {
+            document.getElementById('status').textContent = 'Loading...';
+            Logger.info('Boot', 'Loading external dependencies.');
+            await loadScript('https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js', 'firebase');
+            await loadScript('https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js', 'firebase');
+            await loadScript('https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js', 'firebase');
+
+            if (!window.firebase.apps.length) {
+                window.firebase.initializeApp(FIREBASE_CONFIG);
+            }
+            auth = window.firebase.auth();
+            db = window.firebase.database();
+
+            await loadScript('https://js.stripe.com/v3/', 'Stripe');
+            stripeInstance = window.Stripe(STRIPE_PUBLISHABLE_KEY);
+
+            document.getElementById('status').textContent = 'Ready';
+            
+            auth.onAuthStateChanged(function onAuthStateChangedHandler(user) {
+                window.__RENOVISION__.isAccessible('onAuthStateChangedHandler');
+                window.__RENOVISION__.argsCache('onAuthStateChangedHandler', arguments, this);
+                currentUser = user;
+                if (user) {
+                    const name = user.displayName ? user.displayName.split(' ')[0] : 'User';
+                    document.getElementById('signin-btn').textContent = 'Hi, ' + name;
+                    initRealtime();
+                } else {
+                    document.getElementById('signin-btn').textContent = 'Sign in via Google';
+                }
+            });
+        } catch (error) {
+            Logger.error('Boot', 'Dependency Injection Failed', error);
+            document.getElementById('status').textContent = 'Init Failed';
+        }
+    }
+
+    // ==========================================
+    // CORE LOGIC
+    // ==========================================
+    
+    function initAuth() {
+        window.__RENOVISION__.isAccessible('initAuth');
+        window.__RENOVISION__.argsCache('initAuth', arguments, this);
+        Logger.info('Auth', 'Initiating Google Sign-In...');
+        const provider = new window.firebase.auth.GoogleAuthProvider();
+        auth.signInWithPopup(provider).catch(function onAuthError(err) {
+            window.__RENOVISION__.isAccessible('onAuthError');
+            window.__RENOVISION__.argsCache('onAuthError', arguments, this);
+            Logger.error('Auth', 'Sign-in failed', err);
+            alert('Sign in failed: ' + err.message);
+        });
+    }
+
+    function initRealtime() {
+        window.__RENOVISION__.isAccessible('initRealtime');
+        window.__RENOVISION__.argsCache('initRealtime', arguments, this);
+        if (!currentUser || !currentPropertyId) return;
+
+        db.ref('requests/' + currentUser.uid + '/' + currentPropertyId).on('value', function onRequestsUpdate(snap) {
+            window.__RENOVISION__.isAccessible('onRequestsUpdate');
+            window.__RENOVISION__.argsCache('onRequestsUpdate', arguments, this);
+            const count = snap.exists() ? Object.keys(snap.val()).length : 0;
+            document.getElementById('requests-count').textContent = count;
+        });
+
+        db.ref('scouts/' + currentUser.uid + '/' + currentPropertyId).on('value', function onScoutsUpdate(snap) {
+            window.__RENOVISION__.isAccessible('onScoutsUpdate');
+            window.__RENOVISION__.argsCache('onScoutsUpdate', arguments, this);
+            const count = snap.exists() ? Object.keys(snap.val()).length : 0;
+            document.getElementById('scouts-count').textContent = count;
+        });
+    }
+
+    async function requestBounty() {
+        window.__RENOVISION__.isAccessible('requestBounty');
+        window.__RENOVISION__.argsCache('requestBounty', arguments, this);
+        if (!currentUser) return alert('Please sign in first');
+
+        try {
+            const bidStr = await promptAsync('Request Address Validation', 'Enter your bounty bid in HUF:');
+            if (bidStr === null) return; 
+
+            const bid = parseInt(bidStr);
+            if (!bid || isNaN(bid)) return alert('Invalid bid amount.');
+
+            document.getElementById('status').textContent = 'Starting checkout...';
+            const response = await fetch(BACKEND_URL + '/api/create-checkout', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ bid: bid, propertyId: currentPropertyId, userId: currentUser.uid })
+            });
+
+            if (!response.ok) throw new Error('HTTP error! status: ' + response.status);
+            const data = await response.json();
+            
+            if (data.sessionId) stripeInstance.redirectToCheckout({ sessionId: data.sessionId });
+            else throw new Error('No session ID returned.');
+        } catch (error) {
+            Logger.error('Bounty', 'Failed request process', error);
+            document.getElementById('status').textContent = 'Error';
+        }
+    }
+
+    async function submitScout() {
+        window.__RENOVISION__.isAccessible('submitScout');
+        window.__RENOVISION__.argsCache('submitScout', arguments, this);
+        if (!currentUser) return alert('Please sign in first');
+
+        try {
+            const snap = await db.ref('scouts_meta/' + currentUser.uid + '/stripeAccountId').once('value');
+            if (!snap.exists()) {
+                if (confirm("Set up Stripe Connect account to receive payouts?")) {
+                    document.getElementById('status').textContent = 'Redirecting...';
+                    const response = await fetch(BACKEND_URL + '/api/onboard-scout', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId: currentUser.uid })
+                    });
+                    if (!response.ok) throw new Error('Failed to generate onboarding link');
+                    const data = await response.json();
+                    window.location.href = data.url; 
+                }
+                return;
+            }
+
+            const address = await promptAsync('Submit Scouted Address', 'Enter exact address:');
+            if (!address) return; 
+            
+            document.getElementById('scout-btn').disabled = true;
+            document.getElementById('status').textContent = 'Submitting...';
+
+            await db.ref('scouts/' + currentUser.uid + '/' + currentPropertyId).push({
+                address: address,
+                userId: currentUser.uid,
+                timestamp: window.firebase.database.ServerValue.TIMESTAMP,
+                status: 'pending'
+            });
+
+            document.getElementById('status').textContent = '✅ Submitted!';
+        } catch (error) {
+            Logger.error('Scout', 'Failed scout process', error);
+            document.getElementById('scout-btn').disabled = false;
+            document.getElementById('status').textContent = 'Error';
+        }
+    }
+
+    // ==========================================
+    // DEEP LINK LOGIC & BOOTSTRAP
+    // ==========================================
+
+    async function processRenovisionState(context) {
+        window.__RENOVISION__.isAccessible('processRenovisionState');
+        window.__RENOVISION__.argsCache('processRenovisionState', arguments, this);
+        Logger.info('Logic', 'Evaluating deep link state for requestor: ' + context.requestorId);
+    }
+
+    window.bootRenovision = async function bootRenovision(deepLinkParams) {
+        window.__RENOVISION__.isAccessible('bootRenovision');
+        window.__RENOVISION__.argsCache('bootRenovision', arguments, this);
+
+        currentPropertyId = getPropertyId();
+        if (!currentPropertyId) return;
+
+        Logger.info('Boot', 'Initializing application on Property: ' + currentPropertyId);
+        injectCSS();
+        createUI();
+        await initDependencies();
+
+        if (deepLinkParams && deepLinkParams.requestorId) {
+            await processRenovisionState(deepLinkParams);
+        }
+    };
+
+    window.addEventListener('hashchange', function onHashChangeHandler(event) {
+        window.__RENOVISION__.isAccessible('onHashChangeHandler');
+        window.__RENOVISION__.argsCache('onHashChangeHandler', arguments, this);
+        
+const hashString = window.location.hash.substring(1);
+        if (hashString) {
+            const hashParams = new URLSearchParams(hashString);
+            processRenovisionState({
+                propertyId: currentPropertyId,
+                affiliateId: hashParams.get('affiliateId'),
+                requestorId: hashParams.get('requestorId'),
+                validatorId: hashParams.get('validatorId')
+            });
+        }
+    });
+
+    window.addEventListener('DOMContentLoaded', function onDOMLoadedHandler() {
+        window.__RENOVISION__.isAccessible('onDOMLoadedHandler');
+        window.__RENOVISION__.argsCache('onDOMLoadedHandler', arguments, this);
+        
+        const hashString = window.location.hash.substring(1);
+        const hashParams = new URLSearchParams(hashString);
+        window.bootRenovision({
+            requestorId: hashParams.get('requestorId') || null
+        });
+    });
+
+})();
