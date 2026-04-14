@@ -1,1 +1,1 @@
-# user.js extension file storage for tampermonkey
+# Browser extensions source base
